@@ -119,6 +119,10 @@ module ActiveRecord
         def returning_clause(conn)
           case returning
           when nil then primary_keys.map { |name| conn.quote_column_name(name) }.join(", ")
+          when false
+            raise ArgumentError,
+              "returning: false is not supported, because these methods always return rows. " \
+              "Use update_all/delete_all if you only want the count."
           when :all then "*"
           else Array(returning).map { |column| returning_column(conn, column) }.join(", ")
           end

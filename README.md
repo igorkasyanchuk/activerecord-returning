@@ -55,6 +55,9 @@ User.where(role: :admin).update_all_returning({ role: :member }, returning: :ema
 | `:all` | `RETURNING *` |
 | `Arel.sql("id, now() AS at")` | that SQL, verbatim |
 
+`returning: false` raises — these methods always return rows. Use plain `update_all`/`delete_all` when
+you only want the count.
+
 A bare `String` is rejected on purpose:
 
 ```ruby
@@ -163,6 +166,16 @@ select-then-update would reintroduce the exact race this gem exists to avoid.
 
 The trade-off: a chainable form would let you bake it into a scope
 (`scope :expiring, -> { where(...).returning(:id) }`). That is not supported, and won't be.
+
+### Compared to `insert_all` / `upsert_all`
+
+The return type and the default are identical to the `returning:` kwarg Rails already ships on
+`insert_all`/`upsert_all`: an `ActiveRecord::Result`, defaulting to the primary key. Three differences:
+
+- `returning: :all` is an addition here. Rails quotes `:all` as a column named `all`.
+- `returning: false` raises instead of returning an empty Result.
+- On MySQL, Rails returns an empty Result; this gem raises `UnsupportedAdapter`, because an empty
+  Result is indistinguishable from "nothing matched".
 
 ## Errors
 

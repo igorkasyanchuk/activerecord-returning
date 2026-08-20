@@ -68,6 +68,12 @@ class UpdateAllReturningTest < ReturningTest
     assert_match(/Arel\.sql/, error.message)
   end
 
+  def test_returning_false_raises_and_says_what_to_use_instead
+    error = assert_raises(ArgumentError) { User.all.update_all_returning({ role: :member }, returning: false) }
+
+    assert_match(/update_all/, error.message)
+  end
+
   def test_empty_updates_raises
     assert_raises(ArgumentError) { User.all.update_all_returning({}) }
   end
