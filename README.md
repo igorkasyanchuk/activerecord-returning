@@ -3,31 +3,53 @@
 [![Gem Version](https://badge.fury.io/rb/activerecord-returning.svg)](https://rubygems.org/gems/activerecord-returning)
 [![CI](https://github.com/igorkasyanchuk/activerecord-returning/actions/workflows/ci.yml/badge.svg)](https://github.com/igorkasyanchuk/activerecord-returning/actions/workflows/ci.yml)
 
-`update_all` and `delete_all` tell you **how many** rows changed. This gem tells you **which** ones.
+**`update_all` tells you how many rows changed. This gem tells you which ones.**
+
+![update_all returns a count; update_all_returning returns the rows](docs/demo.gif)
 
 ```ruby
-User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email])
-# => #<ActiveRecord::Result @columns=["id", "email"],
-#                           @rows=[[1, "ada@example.com"], [2, "grace@example.com"]]>
+User.where(role: :admin).update_all(role: :member)
+# => 2                                    ...which two?
 
-Session.where(expires_at: ..1.week.ago).delete_all_returning(returning: %i[id user_id])
-# => #<ActiveRecord::Result @columns=["id", "user_id"], @rows=[[7, 1], [9, 3]]>
+User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email])
+# => #<ActiveRecord::Result [[1, "ada@example.com"], [2, "grace@example.com"]]>
 ```
 
-One statement. No second query, no `SELECT ... FOR UPDATE` dance, no window between deciding which rows to
-change and changing them.
+One statement. No `pluck` first, no `FOR UPDATE`, no window where another process can change the set
+underneath you.
 
-## The problem
-
-You expire sessions, flip a batch of records, sweep old rows — and then you need to know what you touched,
-to enqueue jobs, send mail, or write an audit log. `update_all` gives you an Integer, so the usual answers are:
+## TL;DR
 
 ```ruby
-# Racy: another process can change the set between the two statements.
+gem "activerecord-returning"
+```
+
+```ruby
+# every form of update_all, plus returning:
+User.where(role: :admin).update_all_returning(role: :member)                    # => primary keys
+User.where(role: :admin).update_all_returning({ role: :member }, returning: :email)
+User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email])
+User.where(role: :admin).update_all_returning({ role: :member }, returning: :all)     # RETURNING *
+User.update_all_returning(role: :member)                                        # on the model, too
+
+Session.where(expires_at: ..1.week.ago).delete_all_returning(returning: :user_id)
+```
+
+Always returns an `ActiveRecord::Result`. PostgreSQL and SQLite 3.35+. Rails 7.0–8.1. Nothing is
+overridden — `update_all` and `delete_all` behave exactly as before.
+
+## Why
+
+Every bulk change ends with the same question: *and then what?* Enqueue jobs for the rows you touched,
+write an audit entry, send the mail, invalidate the cache. `update_all` hands back an Integer, so people
+reach for one of these:
+
+```ruby
+# Racy. Another process can change the set between the two statements.
 ids = Session.where(expires_at: ..1.week.ago).pluck(:id)
 Session.where(id: ids).delete_all
 
-# Correct, but two round trips, a transaction and a lock you have to remember.
+# Correct, but three statements, a transaction and a lock you have to remember.
 Session.transaction do
   ids = Session.where(expires_at: ..1.week.ago).lock.pluck(:id)
   Session.where(id: ids).delete_all
@@ -35,48 +57,131 @@ Session.transaction do
 end
 ```
 
-PostgreSQL and SQLite 3.35+ have supported a `RETURNING` clause on `UPDATE` and `DELETE` for years — one
-statement that changes the rows and hands them back. Active Record exposes it on `insert_all`/`upsert_all`
-through a `returning:` kwarg, but not on `update_all`/`delete_all`. It has been proposed upstream several
-times and, as of Rails 8.1, still hasn't landed. This gem adds the two methods, using only public
-Active Record API.
+Databases have solved this for years with `RETURNING`. Rails exposes it on `insert_all`/`upsert_all` via a
+`returning:` kwarg — but not on `update_all`/`delete_all`. Proposed upstream more than once, still not
+merged as of Rails 8.1. This gem adds the two methods, using only public Active Record API.
 
-## Installation
+## Examples
+
+**Expire sessions, notify their owners**
 
 ```ruby
-# Gemfile
-gem "activerecord-returning"
+expired = Session.where(expires_at: ..Time.current).delete_all_returning(returning: :user_id)
+
+expired.rows.flatten.uniq.each { |user_id| SessionExpiredMailer.notify(user_id).deliver_later }
 ```
 
-```bash
-bundle install
+**Claim work without a race**
+
+```ruby
+claimed = Job.pending.order(:created_at).limit(1)
+             .update_all_returning({ status: :claimed, worker: worker_id }, returning: :all)
+
+job = Job.instantiate(claimed.to_a.first) if claimed.length.positive?
 ```
 
-Nothing to configure and nothing to initialize. Requiring the gem adds two methods to
-`ActiveRecord::Relation` and overrides nothing — no `prepend`, no patched `update_all`.
+Two workers running that at once cannot claim the same row: the `UPDATE` picks it, and only one wins.
+
+**Audit a bulk change**
+
+```ruby
+changed = Invoice.where(status: :draft).update_all_returning(
+  { status: :issued, issued_at: Time.current },
+  returning: %i[id number]
+)
+
+AuditLog.insert_all(changed.to_a.map { |row| { subject: "Invoice##{row["id"]}", action: "issued" } })
+```
+
+**Cancel and report in one pass**
+
+```ruby
+result = Subscription.where(trial_ends_at: ..Date.current)
+                     .update_all_returning({ state: "expired" }, returning: %i[id user_id plan])
+
+Rails.logger.info("expired #{result.length} trials: #{result.rows.inspect}")
+```
+
+**Get models back**
+
+```ruby
+users = User.where(role: :admin)
+            .update_all_returning({ role: :member }, returning: :all)
+            .map { |attributes| User.instantiate(attributes) }
+
+users.first.email        # => "ada@example.com"
+users.first.new_record?  # => false
+```
+
+**Timestamps, if you want them** — like `update_all`, nothing is touched for you:
+
+```ruby
+User.where(role: :admin).update_all_returning(role: :member, updated_at: Time.current)
+```
+
+## `returning:`
+
+| Value | Clause |
+| --- | --- |
+| omitted / `nil` | the primary key (all of them, for a composite primary key) |
+| `:email` | `RETURNING "email"` |
+| `%i[id email]` | `RETURNING "id", "email"` |
+| `:all` | `RETURNING *` |
+| `Arel.sql("id, now() AS at")` | that SQL, verbatim |
+
+Rejected on purpose, each with a message saying what to do instead: a bare `String` (pass symbols, or wrap
+SQL in `Arel.sql`), an empty list, and `returning: false` (use plain `update_all`).
+
+`updates` takes every shape `update_all` accepts:
+
+```ruby
+users.update_all_returning(role: :member)                     # Hash
+users.update_all_returning("role = 0")                        # String
+users.update_all_returning(["email = ?", "x@example.com"])    # Array
+users.update_all_returning(role: :member, returning: :email)  # braceless — returning: is pulled out
+```
+
+Hash values go through the attribute's type, so enums, booleans, JSON and `alias_attribute` cast exactly as
+`update_all` does.
+
+## The return value
+
+Always an `ActiveRecord::Result` — the same class `insert_all` returns, no wrapper, no subclass.
+
+```ruby
+result.columns  # => ["id", "email"]
+result.rows     # => [[1, "ada@example.com"], [2, "grace@example.com"]]
+result.to_a     # => [{"id" => 1, "email" => "ada@example.com"}, ...]
+result.length   # => 2
+result.each { |row| … }
+```
+
+Casting is the **adapter's**, not your model's: PostgreSQL types by OID and gives you a `Time` for a
+`timestamp`; SQLite hands back the raw String. For model types:
+
+```ruby
+result.cast_values(Session.attribute_types)   # => [[7, 1, 2026-08-14 09:00:00 UTC], ...]
+```
 
 ## Database support
 
-| Database | `update_all_returning` | `delete_all_returning` |
-| --- | --- | --- |
-| PostgreSQL (all supported versions) | yes | yes |
-| SQLite 3.35+ (Rails 7.1+; see note) | yes | yes |
-| MySQL | no — raises `UnsupportedAdapter` | no — raises `UnsupportedAdapter` |
-| MariaDB | no — raises `UnsupportedAdapter` | no — raises `UnsupportedAdapter` |
+| Database | Supported |
+| --- | --- |
+| PostgreSQL | yes |
+| SQLite 3.35+ | yes |
+| MySQL | no — raises `UnsupportedAdapter` |
+| MariaDB | no — raises `UnsupportedAdapter` |
 
-Support is read from the adapter's `supports_update_returning?` where that exists, and from
-`supports_insert_returning?` otherwise, so it tracks what your database can do rather than a hardcoded list.
-Two exceptions, both deliberate:
+Read from `supports_update_returning?` where it exists, `supports_insert_returning?` otherwise. Two
+deliberate exceptions:
 
-- **MariaDB answers `supports_insert_returning?` with `true`** — it has `INSERT ... RETURNING` since 10.5 —
-  while having no `UPDATE ... RETURNING` at all. The MySQL family is therefore excluded explicitly, and CI
-  runs a MariaDB lane to keep it that way. (MariaDB does have `DELETE ... RETURNING` since 10.0. This gem
-  does not use it: one adapter answering "sometimes" is worse than answering "no".)
-- The **Rails 7.0 SQLite3 adapter** predates the capability methods, so there the gem checks the SQLite
-  version (3.35+) directly.
+- **MariaDB** answers `supports_insert_returning?` with `true` (it has `INSERT ... RETURNING` since 10.5)
+  while having no `UPDATE ... RETURNING` at all — so the MySQL family is excluded explicitly, and CI runs a
+  MariaDB lane to keep it that way.
+- **Rails 7.0's SQLite3 adapter** predates those capability methods, so the SQLite version is checked
+  directly.
 
-**MySQL has no `RETURNING`** on any statement. There is no SQL for this gem to generate, so it raises
-loudly instead of guessing:
+MySQL has no `RETURNING` on any statement. There is nothing to generate, so it raises rather than guessing:
 
 ```ruby
 User.where(role: :admin).update_all_returning(role: :member)
@@ -88,128 +193,18 @@ On MySQL, do it in two statements with a lock, inside a transaction:
 
 ```ruby
 User.transaction do
-  ids = User.where(role: :admin).lock.pluck(:id)   # SELECT ... FOR UPDATE
+  ids = User.where(role: :admin).lock.pluck(:id)
   User.where(id: ids).update_all(role: :member)
-  User.where(id: ids)                              # the rows you changed
+  User.where(id: ids)
 end
 ```
 
-The gem deliberately does not do that for you. It is only correct inside a transaction with a lock, and
-hiding those requirements behind a method that looks atomic would hand a race to every caller who forgets.
+The gem won't do that for you: it's only correct inside a transaction with a lock, and hiding that behind a
+method that looks atomic hands a race to everyone who forgets.
 
-## Usage
+## How it works
 
-### `update_all_returning`
-
-Takes `updates` in exactly the shapes `update_all` accepts, plus a `returning:` keyword:
-
-```ruby
-User.where(role: :admin).update_all_returning(role: :member)                   # Hash
-User.where(role: :admin).update_all_returning("role = 0")                      # String
-User.where(role: :admin).update_all_returning(["email = ?", "x@example.com"])  # Array
-```
-
-Like `update_all`, it works on the model as well as on a relation:
-
-```ruby
-User.update_all_returning(role: :member)   # every row
-Session.delete_all_returning               # every row
-```
-
-Hash values are cast through the attribute's type, exactly as `update_all` does, so enums, symbols,
-booleans and JSON columns behave identically:
-
-```ruby
-User.where(id: 1).update_all_returning(role: :admin)     # enum -> 1
-Post.where(id: 1).update_all_returning(published: true)  # boolean -> adapter's true
-```
-
-Since both arguments are hashes, a braceless call works too — `returning:` is pulled out of the keywords:
-
-```ruby
-User.where(role: :admin).update_all_returning(role: :member, returning: :email)
-# same as
-User.where(role: :admin).update_all_returning({ role: :member }, returning: :email)
-```
-
-(If you genuinely have a column named `returning`, use the braced form.)
-
-### `delete_all_returning`
-
-```ruby
-Session.where(expires_at: ..1.week.ago).delete_all_returning
-Session.where(expires_at: ..1.week.ago).delete_all_returning(returning: %i[id user_id])
-```
-
-### What `returning:` accepts
-
-| Value | Clause |
-| --- | --- |
-| omitted / `nil` | the primary key (all of them, for a composite primary key) |
-| `:email` | `RETURNING "email"` |
-| `%i[id email]` | `RETURNING "id", "email"` |
-| `:all` | `RETURNING *` |
-| `Arel.sql("id, now() AS at")` | that SQL, verbatim |
-
-A bare `String` is rejected on purpose — it would be raw SQL from a value that is often user input:
-
-```ruby
-User.all.update_all_returning({ role: :member }, returning: "id, email")
-# ArgumentError: returning: does not take raw String "id, email". Pass column names as symbols
-# (returning: :id, returning: %i[id email]) or wrap SQL in Arel.sql.
-```
-
-`returning: false` raises too — these methods always return rows. Use plain `update_all`/`delete_all` when
-you only want the count.
-
-## The return value
-
-Always an `ActiveRecord::Result` — for both methods, whatever the scope, whatever `returning:` was. It is
-the same plain `ActiveRecord::Result` Rails hands back from `insert_all`, not a wrapper or a subclass.
-
-```ruby
-result = User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email])
-
-result.columns  # => ["id", "email"]
-result.rows     # => [[1, "ada@example.com"], [2, "grace@example.com"]]
-result.to_a     # => [{"id" => 1, "email" => "ada@example.com"}, ...]
-result.length   # => 2
-result.each { |row| AuditLog.record(row["id"]) }
-```
-
-Values are cast by the **adapter**, not by your model, so how much casting you get depends on the database:
-PostgreSQL types results by OID and hands back a `Time` for a `timestamp`, while SQLite returns the raw
-`"2026-08-21 09:00:00"` String. `json` columns come back as their serialized String on both. This is the
-same behaviour as `insert_all`.
-
-When you want the model's own types, cast with them explicitly:
-
-```ruby
-result = Session.where(expires_at: ..Time.current).delete_all_returning(returning: :all)
-
-result.cast_values(Session.attribute_types)
-# => [[7, 1, 2026-08-14 09:00:00 UTC], ...]   Time on every adapter
-```
-
-### Getting models back
-
-Ask for every column and hand the rows to `Model.instantiate`:
-
-```ruby
-users = User.where(role: :admin)
-            .update_all_returning({ role: :member }, returning: :all)
-            .map { |attributes| User.instantiate(attributes) }
-
-users.first.email       # => "ada@example.com"
-users.first.new_record? # => false
-```
-
-These are real, persisted records reflecting the post-update row. No callback has run on them. The gem
-doesn't do this for you — the point of a `Result` is that you decide what the rows cost.
-
-## Everything a relation can do still works
-
-The statement is built by reducing your relation to a primary-key `SELECT` and using it as a subquery:
+Your relation is reduced to a primary-key `SELECT` and used as a subquery:
 
 ```sql
 UPDATE "users" SET "role" = 0, "lock_version" = COALESCE("lock_version", 0) + 1
@@ -219,175 +214,121 @@ WHERE "users"."id" IN (
 RETURNING "id", "email"
 ```
 
-Active Record builds that inner `SELECT`, which means default scopes, `joins`, `where`, `limit`, `order`,
-`merge`, `none`, association proxies and composite primary keys all work without this gem knowing anything
-about them:
+Active Record builds that inner `SELECT`, so everything you already know keeps working:
 
 ```ruby
 User.joins(:posts).where(posts: { published: true }).update_all_returning(role: :member)
 User.order(:created_at).limit(100).update_all_returning({ role: :member }, returning: :id)
 User.where(role: :admin).lock.update_all_returning(role: :member)   # FOR UPDATE in the subquery
 user.posts.update_all_returning({ published: true }, returning: :id)
-Memo.update_all_returning(title: "edited")    # STI: only rows of this subclass
+Memo.update_all_returning(title: "edited")                          # STI: this subclass only
 Note.where(shop_id: 1).delete_all_returning   # WHERE ("shop_id", "note_id") IN (SELECT ...)
 ```
 
-`distinct`, `lock` and single-table inheritance are covered by the suite; `group`/`having` raise, see
-Caveats.
+Default scopes, `merge`, `none`, `distinct` and composite primary keys are covered too. No
+`Arel::UpdateManager`, no `_substitute_values`, no `build_arel` — nothing private, which is why one code
+path spans Rails 7.0 to 8.1.
 
-No `Arel::UpdateManager`, no `_substitute_values`, no `build_arel` — nothing private. That is why one code
-path covers Rails 7.0 through 8.1.
-
-The trade-off is that the subquery is always there, even for a plain `where`, while `update_all` writes a
-direct `UPDATE ... WHERE` unless a join or a limit forces otherwise. PostgreSQL usually turns
-`id IN (SELECT id FROM same_table WHERE ...)` into a semi-join on the same index, but on a large table it is
-worth an `EXPLAIN` before putting it on a hot path.
-
-### Optimistic locking
-
-Handled exactly like `update_all`: if the model has a locking column and you did not set it yourself,
-`lock_version = COALESCE(lock_version, 0) + 1` is appended. Set it explicitly and your value wins.
+**Optimistic locking** works like `update_all`: the locking column is incremented unless you set it
+yourself.
 
 ## Caveats
 
-**Callbacks, validations and timestamps are skipped**, exactly as with `update_all`/`delete_all`. Nothing is
-instantiated. In particular `updated_at` is *not* touched — pass it yourself if you want it:
+**Callbacks, validations and timestamps are skipped**, exactly as with `update_all`/`delete_all`. Nothing
+is instantiated.
 
-```ruby
-User.where(role: :admin).update_all_returning(role: :member, updated_at: Time.current)
-```
+**Isolation.** The subquery runs inside the same statement, so there is no separate read. But under `READ
+COMMITTED` (PostgreSQL's default) a row whose value changed after the statement's snapshot can still be
+picked up. Where that matters, lock explicitly or raise the isolation level.
 
-**Isolation.** The subquery is evaluated inside the same statement, so there is no separate read and no
-window between "pick the rows" and "change them". But under `READ COMMITTED` (PostgreSQL's default) a row
-whose value changed after the statement's snapshot can still be re-read and updated — the classic
-`UPDATE ... WHERE status = 'pending'` case. Where that matters, take an explicit lock or raise the
-isolation level:
+**Rejected relations**, each with a message pointing at the fix:
 
-```ruby
-User.transaction do
-  ids = User.where(role: :admin).lock.pluck(:id)
-  User.where(id: ids).update_all_returning({ role: :member }, returning: :email)
-end
-```
+| | why |
+| --- | --- |
+| `includes` that eager-loads | a join can't be reduced to a primary-key subquery — use `joins` |
+| `group` / `having` | the subquery would select an ungrouped column — use `where(id: grouped.select(:id))` |
+| model without a primary key | nothing to match rows on |
 
-**`group` and `having` are rejected**, because the primary-key subquery would select an ungrouped column.
-PostgreSQL rejects that outright; SQLite quietly returns something arbitrary. Reduce the relation first:
-`where(id: grouped_relation.select(:id))`.
+**`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` refers
+to the updated row, not the join.
 
-**Eager loading is rejected.** An `includes` that turns into a join cannot be reduced to a primary-key
-subquery, so it raises `ActiveRecord::Returning::Error`. Use `.joins` instead, or `.unscope(:includes)`.
-
-**`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` in an
-`UPDATE` refers to the updated row, not to the join.
+**Performance.** The subquery is always there, even for a plain `where`, while `update_all` writes a direct
+`UPDATE ... WHERE` unless a join or limit forces otherwise. PostgreSQL usually turns it into a semi-join on
+the same index; on a large hot-path table, `EXPLAIN` first.
 
 ## Active Record may grow its own
 
-[rails/rails#57073](https://github.com/rails/rails/pull/57073) proposes an `update_all_returning` in Active
-Record itself. It is still open, and its API differs from this gem's:
+[rails/rails#57073](https://github.com/rails/rails/pull/57073) proposes an `update_all_returning` upstream.
+Still open, and its API differs:
 
 | | rails/rails#57073 | this gem |
 | --- | --- | --- |
 | columns | `select(...)` on the relation | `returning:` keyword |
 | default | all columns | the primary key |
-| implementation | Arel, plus a new adapter-level `update_returning` | a primary-key subquery, public API only |
 
-Two consequences, both handled:
+So the gemspec caps Active Record at `< 8.2`, and if `ActiveRecord::Relation` already defines either
+method, the gem leaves that one alone and warns at boot instead of silently doing nothing.
 
-- The gemspec caps Active Record at `< 8.2`, so this gem will not silently install next to an upstream
-  method of the same name.
-- If `ActiveRecord::Relation` already defines either method, the gem leaves them alone and prints a warning
-  at boot saying so. An `include` cannot override a method defined on the class itself, and a silent no-op
-  that quietly changes what `returning:` means would be worse than a message.
+Compared to `insert_all`/`upsert_all`, which already have `returning:`: same return type, same default.
+Differences — `:all` is an addition here, `returning: false` raises instead of returning an empty Result,
+and MySQL raises instead of quietly returning an empty Result.
 
-If that PR ships, migrating means replacing `returning: %i[id email]` with `select(:id, :email)` and dropping
-this gem.
+## Why methods, not a chainable `.returning`
 
-## Compared to `insert_all` / `upsert_all`
+`User.returning(:id).where(...).update_all(...)` was considered and rejected:
 
-The return type and the default are identical to the `returning:` kwarg Rails already ships on
-`insert_all`/`upsert_all`: an `ActiveRecord::Result`, defaulting to the primary key. Three differences:
+1. `update_all` would return an Integer *or* a Result depending on state set somewhere else. The call site
+   stops being readable.
+2. It needs `prepend` over `update_all`. Removing the gem would then silently change working code instead
+   of raising `NoMethodError` at the one place that used it.
+3. Rails put `returning:` on `insert_all`/`upsert_all` as a keyword, not a query method.
 
-- `returning: :all` is an addition here. Rails quotes `:all` as a column named `all`.
-- `returning: false` raises instead of returning an empty Result.
-- On MySQL, Rails returns an empty Result; this gem raises `UnsupportedAdapter`, because an empty Result is
-  indistinguishable from "nothing matched".
-
-## Why methods instead of a chainable `.returning`
-
-`User.returning(:id).where(...).update_all(...)` was considered and deliberately rejected:
-
-1. It would make `update_all` return an Integer *or* a Result depending on state possibly set in another
-   file. The call site stops being readable and the type stops being checkable.
-2. It needs `prepend` over `update_all`/`delete_all`. Removing the gem would then silently change the
-   behaviour of working code, instead of raising `NoMethodError` at the one place that used it.
-3. Rails put `returning:` on `insert_all`/`upsert_all` as a keyword argument, not a query method. Matching
-   that precedent keeps the migration path open if `update_all(returning:)` ever lands upstream.
-
-The trade-off: a chainable form would let you bake it into a scope
-(`scope :expiring, -> { where(...).returning(:id) }`). That is not supported, and won't be.
+The trade-off: you can't bake it into a scope. That's the intended cost.
 
 ## Errors
 
 | Error | When |
 | --- | --- |
-| `ActiveRecord::Returning::UnsupportedAdapter` | the adapter cannot do `RETURNING` (MySQL, MariaDB, SQLite < 3.35) |
-| `ActiveRecord::Returning::Error` | eager loading, or a model with no primary key |
-| `ActiveRecord::Returning::Error` | a relation with `group`/`having` |
-| `ArgumentError` | empty updates, a bare String in `returning:`, an empty `returning:` list, or `returning: false` |
+| `ActiveRecord::Returning::UnsupportedAdapter` | MySQL, MariaDB, SQLite < 3.35 |
+| `ActiveRecord::Returning::Error` | eager loading, `group`/`having`, no primary key |
+| `ArgumentError` | empty updates, bare String / empty list / `false` in `returning:` |
 
-`UnsupportedAdapter` inherits from `ActiveRecord::Returning::Error`, which inherits from `StandardError`.
+`UnsupportedAdapter < Error < StandardError`.
 
 ## Requirements
 
-- Ruby 3.1+
-- Active Record 7.0 – 8.1 (the gemspec caps at `< 8.2`, see below)
-- PostgreSQL, or SQLite 3.35+
+Ruby 3.1+ · Active Record 7.0–8.1 · PostgreSQL or SQLite 3.35+
 
-CI runs Ruby 3.1–3.4 against Rails 7.0, 7.1, 7.2, 8.0 and 8.1 on SQLite, PostgreSQL on every one of those
-Rails versions, and MySQL (Rails 7.1 and 8.1) plus MariaDB (Rails 8.1) to keep the unsupported-adapter path
-honest. The dependency range in the gemspec is exactly the range that matrix exercises — `to_sql` output shifts subtly between versions, and that matrix is what catches it.
+CI covers Ruby 3.1–3.4 × Rails 7.0, 7.1, 7.2, 8.0, 8.1 on SQLite, PostgreSQL on every one of those Rails
+versions, and MySQL 8 and MariaDB 11 for the unsupported-adapter path.
 
 ## Development
 
 ```bash
 bin/setup                 # create the dev database, load the schema, seed it
-bin/console               # IRB with User, Post, Session, Note (composite PK), Legacy (no PK)
+bin/console               # IRB with User, Post, Session, Note (composite PK), Memo (STI)
 bundle exec rake test
 ```
 
-Everything above takes `DB=sqlite` (default, a file under `dev/`), `DB=postgres`, `DB=mysql` or
-`DB=mariadb`:
+All three take `DB=sqlite` (default), `DB=postgres`, `DB=mysql` or `DB=mariadb`; databases are created for
+you, connections come from `PGHOST`/`PGUSER`/`PGPASSWORD` and `MYSQL_HOST`/`MYSQL_PORT`/`MYSQL_USER`/
+`MYSQL_PASSWORD`.
 
 ```bash
-DB=postgres bin/setup && DB=postgres bin/console
-DB=postgres bundle exec rake test
-DB=mysql    bundle exec rake test   # only the UnsupportedAdapter tests run here
-DB=mariadb  bundle exec rake test   # same, on port 3307 by default
-```
-
-Connections come from the usual environment variables — `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` and
-`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` — and the databases are created for you. The test
-suite uses in-memory SQLite unless `DB` says otherwise.
-
-Against every supported Rails version:
-
-```bash
-bundle exec appraisal install
-bundle exec appraisal rake test
+bundle exec appraisal install && bundle exec appraisal rake test   # every supported Rails
+python3 docs/render_demo.py                                        # re-render the demo GIF
 ```
 
 ### Releasing
 
 ```bash
-# 1. bump lib/activerecord/returning/version.rb
-# 2. move the Unreleased entries in CHANGELOG.md under the new version
-bundle exec rake release   # tags vX.Y.Z, pushes the tag, pushes the gem to RubyGems
+# bump lib/activerecord/returning/version.rb, move CHANGELOG entries under the new version
+bundle exec rake release
 ```
 
 ## Contributing
 
-Bug reports and pull requests are welcome at
-https://github.com/igorkasyanchuk/activerecord-returning.
+Bug reports and pull requests: https://github.com/igorkasyanchuk/activerecord-returning
 
 ## License
 

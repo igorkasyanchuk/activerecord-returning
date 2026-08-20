@@ -27,7 +27,7 @@ puts <<~BANNER
   RETURNING supported here: #{Dev.returning_supported?}
 
   Models:  User (roles member/admin, optimistic locking), Post, Session,
-           Note (composite primary key), Legacy (no primary key)
+           Note (composite primary key), Memo < Document (STI), Legacy (no primary key)
 
     User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email]).to_a
     Session.where(expires_at: ..Time.current).delete_all_returning(returning: :user_id).rows
