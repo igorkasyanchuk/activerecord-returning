@@ -62,7 +62,7 @@ module ActiveRecord
         end
 
         def validate!(conn)
-          unless returning_supported?(conn)
+          unless Returning.supported?(conn)
             raise UnsupportedAdapter,
               "the #{conn.adapter_name} adapter does not support RETURNING on UPDATE/DELETE"
           end
@@ -75,21 +75,6 @@ module ActiveRecord
           end
 
           raise Error, "#{klass.name} has no primary key, so there is nothing to match rows on" if primary_keys.empty?
-        end
-
-        # supports_update_returning? is the precise question, but it only exists
-        # on newer Rails; supports_insert_returning? is the same answer on every
-        # adapter that ships today. Both already carry SQLite's version check.
-        #
-        # The SQLite branch is for Rails 7.0, whose SQLite3 adapter predates the
-        # capability methods even though the database itself supports RETURNING.
-        # Version knows how to compare itself to a version string; a plain string
-        # compare would read "3.4.0" as newer than "3.35.0".
-        def returning_supported?(conn)
-          return conn.supports_update_returning? if conn.respond_to?(:supports_update_returning?)
-          return true if conn.supports_insert_returning?
-
-          conn.adapter_name.to_s.match?(/sqlite/i) && conn.database_version >= "3.35.0"
         end
 
         def set_clause(conn, updates)
@@ -152,7 +137,7 @@ module ActiveRecord
           # SqlLiteral is a String subclass, so it has to be checked first.
           case column
           when Arel::Nodes::SqlLiteral then column.to_s
-          when Symbol then conn.quote_column_name(column)
+          when Symbol then returning_attribute(conn, column)
           when String
             raise ArgumentError,
               "returning: does not take raw String #{column.inspect}. Pass column names as symbols " \
@@ -160,6 +145,16 @@ module ActiveRecord
           else
             raise ArgumentError, "unsupported returning: value #{column.inspect}"
           end
+        end
+
+        # An alias_attribute is not a column, so it has to be resolved — and then
+        # aliased back, so the caller reads the result under the name they asked
+        # for: RETURNING "title" AS "headline".
+        def returning_attribute(conn, name)
+          column = klass.attribute_aliases[name.to_s]
+          return conn.quote_column_name(name) if column.nil?
+
+          "#{conn.quote_column_name(column)} AS #{conn.quote_column_name(name)}"
         end
 
         def primary_keys

@@ -169,6 +169,13 @@ class UpdateAllReturningTest < ReturningTest
     assert_equal [["Edited"]], result.rows
   end
 
+  def test_alias_attribute_names_are_resolved_in_returning
+    result = Post.where(title: "Draft").update_all_returning({ title: "Edited" }, returning: %i[id headline])
+
+    assert_equal %w[id headline], result.columns
+    assert_equal "Edited", result.to_a.first["headline"]
+  end
+
   def test_json_columns_are_serialized_like_update_all
     Post.where(title: "Draft").update_all_returning(metadata: { "source" => "import" })
 

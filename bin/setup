@@ -7,6 +7,9 @@
 #   DB=postgres bin/setup
 #   DB=mysql bin/setup
 
+# A fresh clone has no gems yet, and everything below needs them.
+system("bundle", "check", out: File::NULL) || system("bundle", "install") || abort("bundle install failed")
+
 require "bundler/setup"
 require_relative "../dev/boot"
 

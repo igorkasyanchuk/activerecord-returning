@@ -29,9 +29,12 @@ Initial release.
 
 - The query cache is cleared after each statement. Rails 7.0's `exec_query` does not do it, which would
   leave a cached `find` returning the pre-update row.
-- Adapter support prefers `supports_update_returning?` where it exists (MariaDB can do
-  `INSERT ... RETURNING` but not `UPDATE ... RETURNING`), falling back to `supports_insert_returning?`.
-- `alias_attribute` names are resolved before the SET clause is built, as `update_all` does.
+- Adapter support prefers `supports_update_returning?` where it exists, falling back to
+  `supports_insert_returning?` — with the MySQL family excluded explicitly, because MariaDB answers
+  `supports_insert_returning?` with `true` (it has `INSERT ... RETURNING` since 10.5) while having no
+  `UPDATE ... RETURNING` at all. CI has a MariaDB lane.
+- `alias_attribute` names are resolved in both `updates` and `returning:`, as `update_all` and `pluck` do.
+  A returned alias keeps the caller's name: `RETURNING "title" AS "headline"`.
 - Active Record is capped at `< 8.2` because rails/rails#57073 proposes an upstream `update_all_returning`
   with a different API. If a relation already defines these methods, the gem leaves them alone and warns.
 

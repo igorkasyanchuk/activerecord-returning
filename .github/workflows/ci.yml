@@ -33,6 +33,10 @@ jobs:
           - { ruby: "3.4", rails: "8.1", db: postgres }
           - { ruby: "3.4", rails: "7.1", db: mysql }
           - { ruby: "3.4", rails: "8.1", db: mysql }
+          # MariaDB answers supports_insert_returning? with true (it has
+          # INSERT ... RETURNING) while having no UPDATE ... RETURNING at all,
+          # so it needs its own lane.
+          - { ruby: "3.4", rails: "8.1", db: mariadb }
 
     services:
       postgres:
@@ -46,6 +50,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
       mysql:
         image: mysql:8

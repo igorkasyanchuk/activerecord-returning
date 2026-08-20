@@ -36,18 +36,18 @@ module Dev
         database: database,
         encoding: "utf8"
       }.compact
-    when "mysql"
+    when "mysql", "mariadb"
       {
         adapter: "trilogy",
         host: ENV.fetch("MYSQL_HOST", "127.0.0.1"),
-        port: ENV.fetch("MYSQL_PORT", 3306).to_i,
+        port: ENV.fetch("MYSQL_PORT", ADAPTER == "mariadb" ? 3307 : 3306).to_i,
         username: ENV.fetch("MYSQL_USER", "root"),
         password: ENV["MYSQL_PASSWORD"],
         database: database,
         encoding: "utf8mb4"
       }.compact
     else
-      raise ArgumentError, "unknown DB=#{ADAPTER} (sqlite, postgres, mysql)"
+      raise ArgumentError, "unknown DB=#{ADAPTER} (sqlite, postgres, mysql, mariadb)"
     end
   end
 
@@ -75,8 +75,9 @@ module Dev
     ADAPTER == "postgres" ? "postgres" : "mysql"
   end
 
+  # load, not require, so reset! really does reload the schema each time.
   def load_schema!
-    require_relative "schema"
+    load File.expand_path("schema.rb", __dir__)
   end
 
   def load_models!
@@ -84,7 +85,7 @@ module Dev
   end
 
   def seed!
-    require_relative "seeds"
+    load File.expand_path("seeds.rb", __dir__)
     Seeds.run
   end
 
@@ -102,13 +103,10 @@ module Dev
     false
   end
 
-  # Does this connection support UPDATE/DELETE ... RETURNING at all? MySQL does
-  # not, so the suite only checks the UnsupportedAdapter path there.
+  # Exactly the question the gem itself asks, so the suite can never decide to
+  # skip on a connection the gem would have run on, or the other way round.
   def returning_supported?
-    ActiveRecord::Base.connection_pool.with_connection do |conn|
-      conn.supports_insert_returning? ||
-        (conn.adapter_name.to_s.match?(/sqlite/i) && conn.database_version.to_s >= "3.35.0")
-    end
+    ActiveRecord::Base.connection_pool.with_connection { |conn| ActiveRecord::Returning.supported?(conn) }
   end
 
   def describe

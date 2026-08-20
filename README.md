@@ -64,13 +64,19 @@ Nothing to configure and nothing to initialize. Requiring the gem adds two metho
 | MySQL | no — raises `UnsupportedAdapter` | no — raises `UnsupportedAdapter` |
 | MariaDB | no — raises `UnsupportedAdapter` | no — raises `UnsupportedAdapter` |
 
-Support is decided by the adapter's own `supports_insert_returning?`, so it tracks what your database can
-actually do rather than a hardcoded list. The one exception: the Rails 7.0 SQLite3 adapter predates that
-capability method, so on Rails 7.0 the gem checks the SQLite version (3.35+) directly.
+Support is read from the adapter's `supports_update_returning?` where that exists, and from
+`supports_insert_returning?` otherwise, so it tracks what your database can do rather than a hardcoded list.
+Two exceptions, both deliberate:
 
-**MySQL has no `RETURNING`** — on any statement. MariaDB has it for `INSERT` (10.5+) and `DELETE` (10.0+),
-but not for `UPDATE`, and neither the `mysql2` nor the `trilogy` adapter reports returning support. There is
-no SQL for this gem to generate, so it raises loudly instead of guessing:
+- **MariaDB answers `supports_insert_returning?` with `true`** — it has `INSERT ... RETURNING` since 10.5 —
+  while having no `UPDATE ... RETURNING` at all. The MySQL family is therefore excluded explicitly, and CI
+  runs a MariaDB lane to keep it that way. (MariaDB does have `DELETE ... RETURNING` since 10.0. This gem
+  does not use it: one adapter answering "sometimes" is worse than answering "no".)
+- The **Rails 7.0 SQLite3 adapter** predates the capability methods, so there the gem checks the SQLite
+  version (3.35+) directly.
+
+**MySQL has no `RETURNING`** on any statement. There is no SQL for this gem to generate, so it raises
+loudly instead of guessing:
 
 ```ruby
 User.where(role: :admin).update_all_returning(role: :member)
@@ -327,9 +333,9 @@ The trade-off: a chainable form would let you bake it into a scope
 - Active Record 7.0 – 8.1 (the gemspec caps at `< 8.2`, see below)
 - PostgreSQL, or SQLite 3.35+
 
-CI runs Ruby 3.1–3.4 against Rails 7.0, 7.1, 7.2, 8.0 and 8.1 on SQLite, plus PostgreSQL (Rails 7.0 and 8.1)
-and MySQL (Rails 7.1 and 8.1). The dependency range in the gemspec is exactly the range that matrix
-exercises — `to_sql` output shifts subtly between versions, and that matrix is what catches it.
+CI runs Ruby 3.1–3.4 against Rails 7.0, 7.1, 7.2, 8.0 and 8.1 on SQLite, PostgreSQL on every one of those
+Rails versions, and MySQL (Rails 7.1 and 8.1) plus MariaDB (Rails 8.1) to keep the unsupported-adapter path
+honest. The dependency range in the gemspec is exactly the range that matrix exercises — `to_sql` output shifts subtly between versions, and that matrix is what catches it.
 
 ## Development
 
@@ -339,12 +345,14 @@ bin/console               # IRB with User, Post, Session, Note (composite PK), L
 bundle exec rake test
 ```
 
-Everything above takes `DB=sqlite` (default, a file under `dev/`), `DB=postgres` or `DB=mysql`:
+Everything above takes `DB=sqlite` (default, a file under `dev/`), `DB=postgres`, `DB=mysql` or
+`DB=mariadb`:
 
 ```bash
 DB=postgres bin/setup && DB=postgres bin/console
 DB=postgres bundle exec rake test
 DB=mysql    bundle exec rake test   # only the UnsupportedAdapter tests run here
+DB=mariadb  bundle exec rake test   # same, on port 3307 by default
 ```
 
 Connections come from the usual environment variables — `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` and
