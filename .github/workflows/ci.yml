@@ -81,7 +81,9 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
       MYSQL_HOST: 127.0.0.1
-      MYSQL_PORT: "3306"
+      # The MariaDB service is published on 3307, so the mariadb lane really
+      # talks to MariaDB and not to the MySQL 8 service next to it.
+      MYSQL_PORT: ${{ matrix.db == 'mariadb' && '3307' || '3306' }}
       MYSQL_USER: root
       MYSQL_PASSWORD: root
 

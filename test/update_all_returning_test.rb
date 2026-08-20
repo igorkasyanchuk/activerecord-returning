@@ -229,6 +229,35 @@ class UpdateAllReturningTest < ReturningTest
     assert_match(/group/, error.message)
   end
 
+  def test_having_without_group_raises_too
+    error = assert_raises(ActiveRecord::Returning::Error) do
+      User.having("COUNT(*) > 0").update_all_returning(role: :member)
+    end
+
+    assert_match(/having/, error.message)
+  end
+
+  def test_group_and_having_together_raise
+    assert_raises(ActiveRecord::Returning::Error) do
+      User.group(:role).having("COUNT(*) > 1").update_all_returning(role: :member)
+    end
+  end
+
+  def test_unscoping_the_group_makes_it_work_again
+    result = User.group(:role).unscope(:group).update_all_returning({ role: :member }, returning: :id)
+
+    assert_equal User.count, result.rows.size
+  end
+
+  def test_the_documented_workaround_for_a_grouped_relation
+    # What the error message tells you to do.
+    grouped = User.group(:role).select("MIN(id) AS id")
+
+    result = User.where(id: grouped).update_all_returning({ role: :member }, returning: :id)
+
+    assert_equal 2, result.rows.size # one per role
+  end
+
   def test_empty_returning_list_raises
     assert_raises(ArgumentError) { User.all.update_all_returning({ role: :member }, returning: []) }
   end

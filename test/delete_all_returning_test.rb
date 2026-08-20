@@ -100,6 +100,25 @@ class DeleteAllReturningTest < ReturningTest
     assert_raises(ActiveRecord::Returning::Error) { Session.group(:user_id).delete_all_returning }
   end
 
+  def test_having_without_group_raises_too
+    assert_raises(ActiveRecord::Returning::Error) { Session.having("COUNT(*) > 0").delete_all_returning }
+  end
+
+  def test_unscoping_the_group_makes_it_work_again
+    result = Session.group(:user_id).unscope(:group).delete_all_returning(returning: :id)
+
+    assert_equal 3, result.rows.size
+    assert_equal 0, Session.count
+  end
+
+  def test_the_documented_workaround_for_a_grouped_relation
+    grouped = Session.group(:user_id).select("MIN(id) AS id")
+
+    result = Session.where(id: grouped).delete_all_returning(returning: :id)
+
+    assert_equal 3, result.rows.size # one session per user
+  end
+
   def test_empty_returning_list_raises
     assert_raises(ArgumentError) { Session.all.delete_all_returning(returning: []) }
   end

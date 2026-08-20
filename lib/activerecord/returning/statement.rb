@@ -89,7 +89,7 @@ module ActiveRecord
               "or `.unscope(:includes)`."
           end
 
-          if relation.group_values.any?
+          if relation.group_values.any? || !relation.having_clause.empty?
             raise Error,
               "#{self.class.name} cannot be used with group or having: the primary key subquery would " \
               "select a column that is not grouped. Reduce the relation to plain conditions first, for " \
