@@ -4,3 +4,4 @@
 Gemfile.lock
 gemfiles/*.gemfile.lock
 dev/*.sqlite3
+*.gem
