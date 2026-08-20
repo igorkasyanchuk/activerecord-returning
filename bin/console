@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require_relative "../examples/demo_app"
+
+DemoApp.seed!
+
+puts <<~BANNER
+  activerecord-returning console (in-memory SQLite, SQLite #{ActiveRecord::Base.connection_pool.with_connection { |c| c.database_version }})
+
+  Models: User (roles: member/admin, optimistic locking), Post, Session, Note (composite PK)
+
+  Try:
+    User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email]).to_a
+    Session.where(expires_at: ..Time.current).delete_all_returning(returning: :user_id).rows
+    User.joins(:posts).where(posts: { published: true }).update_all_returning({ email: "x@y.z" })
+    User.all.update_all_returning({ role: :admin }, returning: :all).to_a
+    DemoApp.seed!   # start over
+BANNER
+
+require "irb"
+IRB.start(__FILE__)
