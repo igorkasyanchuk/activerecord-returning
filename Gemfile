@@ -10,6 +10,7 @@ gem "sqlite3"
 gem "appraisal"
 gem "irb"
 
-# The suite runs on in-memory SQLite by default. Set DATABASE_URL=postgres://... to run it
-# against PostgreSQL instead; that is what the pg gem is here for.
+# The suite runs on in-memory SQLite by default; DB=postgres or DB=mysql run it
+# against a real server instead.
 gem "pg"
+gem "trilogy"

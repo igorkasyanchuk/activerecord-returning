@@ -1,3 +1,22 @@
-#!/usr/bin/env bash
-set -euo pipefail
-bundle install
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Creates the development database, loads the schema and seeds it.
+#
+#   bin/setup                 sqlite (a file under dev/)
+#   DB=postgres bin/setup
+#   DB=mysql bin/setup
+
+require "bundler/setup"
+require_relative "../dev/boot"
+
+puts "==> #{Dev.describe}"
+Dev.reset!
+
+puts <<~NEXT
+  schema loaded and seeded: #{Dev.counts.map { |table, count| "#{table} #{count}" }.join(", ")}
+
+  Open the console:
+
+    #{"DB=#{Dev::ADAPTER} " unless Dev::ADAPTER == "sqlite"}bin/console
+NEXT

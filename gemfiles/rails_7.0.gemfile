@@ -8,6 +8,7 @@ gem "sqlite3", "~> 1.4"
 gem "appraisal"
 gem "irb"
 gem "pg"
+gem "trilogy"
 gem "activerecord", "~> 7.0.0"
 
 gemspec path: "../"

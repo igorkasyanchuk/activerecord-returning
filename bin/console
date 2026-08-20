@@ -1,23 +1,45 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "bundler/setup"
-require_relative "../examples/demo_app"
+# IRB with the sandbox database, models and seed data loaded.
+#
+#   bin/console                 sqlite
+#   DB=postgres bin/console
 
-DemoApp.seed!
+require "bundler/setup"
+require "irb"
+require_relative "../dev/boot"
+
+Dev.connect!
+Dev.load_models!
+
+unless Dev.ready?
+  abort <<~SETUP
+    No schema in #{Dev.describe}.
+
+    Run #{"DB=#{Dev::ADAPTER} " unless Dev::ADAPTER == "sqlite"}bin/setup first.
+  SETUP
+end
 
 puts <<~BANNER
-  activerecord-returning console (in-memory SQLite, SQLite #{ActiveRecord::Base.connection_pool.with_connection { |c| c.database_version }})
+  activerecord-returning #{ActiveRecord::Returning::VERSION} sandbox - #{Dev.describe}
+  #{Dev.counts.map { |table, count| "#{table}: #{count}" }.join("  ")}
+  RETURNING supported here: #{Dev.returning_supported?}
 
-  Models: User (roles: member/admin, optimistic locking), Post, Session, Note (composite PK)
+  Models:  User (roles member/admin, optimistic locking), Post, Session,
+           Note (composite primary key), Legacy (no primary key)
 
-  Try:
     User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email]).to_a
     Session.where(expires_at: ..Time.current).delete_all_returning(returning: :user_id).rows
-    User.joins(:posts).where(posts: { published: true }).update_all_returning({ email: "x@y.z" })
+    User.joins(:posts).where(posts: { published: true }).update_all_returning(email: "x@y.z")
     User.all.update_all_returning({ role: :admin }, returning: :all).to_a
-    DemoApp.seed!   # start over
+
+  Helpers: Dev.seed!   re-seed        Dev.reset!  reload schema, then re-seed
+           Dev.counts  row counts     Dev.log!(false)  quiet the SQL logging
+
 BANNER
 
-require "irb"
-IRB.start(__FILE__)
+# Echo every statement, so you can see what the gem actually sends.
+Dev.log!
+
+IRB.start

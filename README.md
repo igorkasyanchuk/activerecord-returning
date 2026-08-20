@@ -143,8 +143,9 @@ subquery, so it raises `ActiveRecord::Returning::Error`. Use `.joins` instead, o
 
 **Adapters.** Requires `RETURNING` support: PostgreSQL, and SQLite 3.35+ (Rails 7.1+ — the Rails 7.0 SQLite3
 adapter has no returning support of its own, so the gem version-checks the database directly there).
-MySQL and MariaDB raise `ActiveRecord::Returning::UnsupportedAdapter`; there is no emulation fallback,
-because a select-then-update would reintroduce the exact race this gem exists to avoid.
+MySQL and MariaDB raise `ActiveRecord::Returning::UnsupportedAdapter` — and CI runs the suite against
+MySQL to prove it raises rather than doing something surprising. There is no emulation fallback, because a
+select-then-update would reintroduce the exact race this gem exists to avoid.
 
 **`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` in an
 `UPDATE` refers to the updated row, not the join.
@@ -176,17 +177,22 @@ Both error classes inherit from `ActiveRecord::Returning::Error < StandardError`
 ## Development
 
 ```bash
-bin/setup                 # or: bundle install
-bundle exec rake test     # in-memory SQLite
-bin/console               # dummy app: User, Post, Session, Note (composite PK), pre-seeded
+bin/setup                 # create the dev database, load the schema, seed it
+bin/console               # IRB with User, Post, Session, Note (composite PK), Legacy (no PK)
+bundle exec rake test
 ```
 
-Run the suite against a real PostgreSQL:
+Everything above takes `DB=sqlite` (default, a file under `dev/`), `DB=postgres` or `DB=mysql`:
 
 ```bash
-createdb activerecord_returning_test
-DATABASE_URL=postgres://localhost/activerecord_returning_test bundle exec rake test
+DB=postgres bin/setup && DB=postgres bin/console
+DB=postgres bundle exec rake test
+DB=mysql    bundle exec rake test   # only the UnsupportedAdapter tests run here
 ```
+
+PostgreSQL and MySQL connections come from the usual environment variables — `PGHOST`, `PGPORT`,
+`PGUSER`, `PGPASSWORD` and `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` — and the
+databases are created for you. The test suite uses in-memory SQLite unless `DB` says otherwise.
 
 Against every supported Rails version:
 
@@ -195,6 +201,14 @@ bundle exec appraisal install
 bundle exec appraisal rake test
 ```
 
+CI runs Ruby 3.1–3.4 across Rails 7.0, 7.1, 7.2, 8.0 and 8.1 on SQLite, plus PostgreSQL (Rails 7.0 and
+8.1) and MySQL (Rails 7.1 and 8.1).
+
+## Contributing
+
+Bug reports and pull requests are welcome at
+https://github.com/igorkasyanchuk/activerecord-returning.
+
 ## License
 
-MIT.
+MIT. Copyright (c) 2026 Igor Kasyanchuk.
