@@ -51,6 +51,51 @@ class DeleteAllReturningTest < ReturningTest
     assert_raises(ArgumentError) { Session.all.delete_all_returning(returning: "id") }
   end
 
+  def test_can_be_called_on_the_model_itself
+    result = Session.delete_all_returning(returning: :id)
+
+    assert_equal 3, result.rows.size
+    assert_equal 0, Session.count
+  end
+
+  def test_joins_does_not_make_the_primary_key_ambiguous
+    result = Session.joins(:user).where(users: { role: :admin }).delete_all_returning(returning: :id)
+
+    assert_equal 2, result.rows.size
+    assert_equal 1, Session.count
+  end
+
+  def test_eager_loading_raises
+    assert_raises(ActiveRecord::Returning::Error) do
+      Session.includes(:user).where(users: { role: :admin }).delete_all_returning
+    end
+  end
+
+  def test_model_without_a_primary_key_raises
+    assert_raises(ActiveRecord::Returning::Error) { Legacy.all.delete_all_returning }
+  end
+
+  def test_composite_primary_key
+    skip "composite primary keys need Rails 7.1+" unless composite_primary_keys?
+
+    result = Note.where(shop_id: 1).delete_all_returning(returning: %i[shop_id note_id])
+
+    assert_equal [[1, 1], [1, 2]], result.rows.sort
+    assert_equal 1, Note.count
+  end
+
+  def test_the_query_cache_is_cleared
+    session = Session.first
+    ActiveRecord::Base.connection.enable_query_cache!
+
+    Session.find(session.id)
+    Session.where(id: session.id).delete_all_returning
+
+    assert_nil Session.find_by(id: session.id)
+  ensure
+    ActiveRecord::Base.connection.disable_query_cache!
+  end
+
   def test_plain_delete_all_still_returns_an_integer
     assert_equal 3, Session.all.delete_all
   end

@@ -156,6 +156,45 @@ class UpdateAllReturningTest < ReturningTest
     assert_match(/primary key/, error.message)
   end
 
+  def test_can_be_called_on_the_model_itself
+    result = User.update_all_returning({ role: :member }, returning: :id)
+
+    assert_equal User.pluck(:id).sort, result.rows.flatten.sort
+    assert_equal 0, User.where(role: :admin).count
+  end
+
+  def test_alias_attribute_names_are_resolved
+    result = Post.where(title: "Draft").update_all_returning({ headline: "Edited" }, returning: :title)
+
+    assert_equal [["Edited"]], result.rows
+  end
+
+  def test_json_columns_are_serialized_like_update_all
+    Post.where(title: "Draft").update_all_returning(metadata: { "source" => "import" })
+
+    assert_equal({ "source" => "import" }, Post.find_by(title: "Draft").metadata)
+  end
+
+  def test_the_query_cache_is_cleared
+    user = User.first
+    ActiveRecord::Base.connection.enable_query_cache!
+
+    User.find(user.id) # caches the row
+    User.where(id: user.id).update_all_returning(email: "fresh@example.com")
+
+    assert_equal "fresh@example.com", User.find(user.id).email
+  ensure
+    ActiveRecord::Base.connection.disable_query_cache!
+  end
+
+  def test_values_can_be_cast_with_the_models_types
+    result = User.where(email: "ada@example.com").update_all_returning({ role: :member }, returning: :all)
+
+    row = result.cast_values(User.attribute_types).first
+
+    assert_kind_of Time, row[User.column_names.index("created_at")]
+  end
+
   def test_relation_is_reset_after_updating
     relation = User.where(role: :admin)
     relation.load

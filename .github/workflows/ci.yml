@@ -22,10 +22,14 @@ jobs:
           - { ruby: "3.1", rails: "8.0" }
           - { ruby: "3.1", rails: "8.1" }
         include:
-          # ...and the other adapters run on the oldest and newest of them.
-          # PostgreSQL is the primary target; MySQL has no RETURNING, so there
-          # the suite only asserts that UnsupportedAdapter is raised.
+          # ...PostgreSQL, the primary target, runs on every one of them...
+          # ...and MySQL, which has no RETURNING, runs the UnsupportedAdapter
+          # tests on the oldest adapter that exists (trilogy landed in 7.1) and
+          # the newest.
           - { ruby: "3.4", rails: "7.0", db: postgres }
+          - { ruby: "3.4", rails: "7.1", db: postgres }
+          - { ruby: "3.4", rails: "7.2", db: postgres }
+          - { ruby: "3.4", rails: "8.0", db: postgres }
           - { ruby: "3.4", rails: "8.1", db: postgres }
           - { ruby: "3.4", rails: "7.1", db: mysql }
           - { ruby: "3.4", rails: "8.1", db: mysql }

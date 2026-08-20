@@ -8,6 +8,7 @@ end
 
 class Post < ActiveRecord::Base
   belongs_to :user
+  alias_attribute :headline, :title
 end
 
 class Session < ActiveRecord::Base

@@ -14,6 +14,7 @@ ActiveRecord::Schema.define do
     t.integer :user_id
     t.string :title
     t.boolean :published, default: false
+    t.json :metadata
     t.timestamps
   end
 

@@ -24,5 +24,8 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "activerecord", ">= 7.0", "< 9.0"
+  # Capped below 8.2 on purpose: rails/rails#57073 proposes an update_all_returning
+  # in Active Record itself, with a different API. Until it is clear what ships,
+  # this gem does not claim to work alongside it.
+  spec.add_dependency "activerecord", ">= 7.0", "< 8.2"
 end

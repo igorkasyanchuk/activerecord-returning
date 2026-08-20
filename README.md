@@ -103,6 +103,13 @@ User.where(role: :admin).update_all_returning("role = 0")                      #
 User.where(role: :admin).update_all_returning(["email = ?", "x@example.com"])  # Array
 ```
 
+Like `update_all`, it works on the model as well as on a relation:
+
+```ruby
+User.update_all_returning(role: :member)   # every row
+Session.delete_all_returning               # every row
+```
+
 Hash values are cast through the attribute's type, exactly as `update_all` does, so enums, symbols,
 booleans and JSON columns behave identically:
 
@@ -164,8 +171,19 @@ result.length   # => 2
 result.each { |row| AuditLog.record(row["id"]) }
 ```
 
-Values come back type-cast by the adapter, so a `datetime` column is a `Time` and a `jsonb` column is a
-Hash, not a String.
+Values are cast by the **adapter**, not by your model, so how much casting you get depends on the database:
+PostgreSQL types results by OID and hands back a `Time` for a `timestamp`, while SQLite returns the raw
+`"2026-08-21 09:00:00"` String. `json` columns come back as their serialized String on both. This is the
+same behaviour as `insert_all`.
+
+When you want the model's own types, cast with them explicitly:
+
+```ruby
+result = Session.where(expires_at: ..Time.current).delete_all_returning(returning: :all)
+
+result.cast_values(Session.attribute_types)
+# => [[7, 1, 2026-08-14 09:00:00 UTC], ...]   Time on every adapter
+```
 
 ### Getting models back
 
@@ -209,6 +227,11 @@ Note.where(shop_id: 1).delete_all_returning   # WHERE ("shop_id", "note_id") IN 
 No `Arel::UpdateManager`, no `_substitute_values`, no `build_arel` — nothing private. That is why one code
 path covers Rails 7.0 through 8.1.
 
+The trade-off is that the subquery is always there, even for a plain `where`, while `update_all` writes a
+direct `UPDATE ... WHERE` unless a join or a limit forces otherwise. PostgreSQL usually turns
+`id IN (SELECT id FROM same_table WHERE ...)` into a semi-join on the same index, but on a large table it is
+worth an `EXPLAIN` before putting it on a hot path.
+
 ### Optimistic locking
 
 Handled exactly like `update_all`: if the model has a locking column and you did not set it yourself,
@@ -241,6 +264,28 @@ subquery, so it raises `ActiveRecord::Returning::Error`. Use `.joins` instead, o
 
 **`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` in an
 `UPDATE` refers to the updated row, not to the join.
+
+## Active Record may grow its own
+
+[rails/rails#57073](https://github.com/rails/rails/pull/57073) proposes an `update_all_returning` in Active
+Record itself. It is still open, and its API differs from this gem's:
+
+| | rails/rails#57073 | this gem |
+| --- | --- | --- |
+| columns | `select(...)` on the relation | `returning:` keyword |
+| default | all columns | the primary key |
+| implementation | Arel, plus a new adapter-level `update_returning` | a primary-key subquery, public API only |
+
+Two consequences, both handled:
+
+- The gemspec caps Active Record at `< 8.2`, so this gem will not silently install next to an upstream
+  method of the same name.
+- If `ActiveRecord::Relation` already defines either method, the gem leaves them alone and prints a warning
+  at boot saying so. An `include` cannot override a method defined on the class itself, and a silent no-op
+  that quietly changes what `returning:` means would be worse than a message.
+
+If that PR ships, migrating means replacing `returning: %i[id email]` with `select(:id, :email)` and dropping
+this gem.
 
 ## Compared to `insert_all` / `upsert_all`
 
@@ -279,7 +324,7 @@ The trade-off: a chainable form would let you bake it into a scope
 ## Requirements
 
 - Ruby 3.1+
-- Active Record 7.0 – 8.1
+- Active Record 7.0 – 8.1 (the gemspec caps at `< 8.2`, see below)
 - PostgreSQL, or SQLite 3.35+
 
 CI runs Ruby 3.1–3.4 against Rails 7.0, 7.1, 7.2, 8.0 and 8.1 on SQLite, plus PostgreSQL (Rails 7.0 and 8.1)

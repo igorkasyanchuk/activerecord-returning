@@ -43,6 +43,10 @@ module ActiveRecord
           with_connection do |conn|
             validate!(conn)
             result = conn.exec_query(yield(conn), name)
+
+            # exec_query only dirties the query cache from Rails 7.1 on, and a
+            # cached SELECT of a row we just changed is stale.
+            conn.clear_query_cache
             relation.reset # loaded records are stale now
             result
           end
@@ -73,25 +77,41 @@ module ActiveRecord
           raise Error, "#{klass.name} has no primary key, so there is nothing to match rows on" if primary_keys.empty?
         end
 
-        # supports_insert_returning? already carries SQLite's 3.35 version check.
-        # The extra branch is only for Rails 7.0, whose SQLite3 adapter predates
-        # the capability method even though the database itself supports it.
+        # supports_update_returning? is the precise question, but it only exists
+        # on newer Rails; supports_insert_returning? is the same answer on every
+        # adapter that ships today. Both already carry SQLite's version check.
+        #
+        # The SQLite branch is for Rails 7.0, whose SQLite3 adapter predates the
+        # capability methods even though the database itself supports RETURNING.
+        # Version knows how to compare itself to a version string; a plain string
+        # compare would read "3.4.0" as newer than "3.35.0".
         def returning_supported?(conn)
+          return conn.supports_update_returning? if conn.respond_to?(:supports_update_returning?)
           return true if conn.supports_insert_returning?
 
-          conn.adapter_name.to_s.match?(/sqlite/i) && conn.database_version.to_s >= "3.35.0"
+          conn.adapter_name.to_s.match?(/sqlite/i) && conn.database_version >= "3.35.0"
         end
 
         def set_clause(conn, updates)
-          set = klass.sanitize_sql_for_assignment(updates)
+          set = klass.sanitize_sql_for_assignment(resolve_aliases(updates))
           set += ", #{increment_lock_version(conn)}" if increment_lock_version?(updates)
           set
+        end
+
+        # alias_attribute names are not columns, so they have to be resolved
+        # before the SET clause is built. update_all does the same.
+        def resolve_aliases(updates)
+          return updates unless updates.is_a?(Hash) && klass.attribute_aliases.any?
+
+          updates.transform_keys { |key| klass.attribute_aliases[key.to_s] || key }
         end
 
         # Matches update_all: bump the lock column unless the caller set it.
         def increment_lock_version?(updates)
           return false unless klass.locking_enabled?
           return false unless updates.is_a?(Hash)
+
+          updates = resolve_aliases(updates)
 
           column = klass.locking_column
           !updates.key?(column) && !updates.key?(column.to_sym)

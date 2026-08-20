@@ -19,11 +19,21 @@ Initial release.
   It defaults to the primary key, including composite primary keys on Rails 7.1+.
 - Optimistic locking support: the locking column is incremented exactly as `update_all` does, unless the
   caller sets it explicitly.
+- Both methods are also delegated onto the model class, like `update_all`, so `User.update_all_returning(...)`
+  works and not only `User.where(...).update_all_returning(...)`.
 - `ActiveRecord::Returning::Error` and `ActiveRecord::Returning::UnsupportedAdapter`, raised on adapters
   without `RETURNING` support (MySQL, MariaDB, SQLite older than 3.35), on eager-loaded relations, and on
   models without a primary key.
 
 ### Notes
+
+- The query cache is cleared after each statement. Rails 7.0's `exec_query` does not do it, which would
+  leave a cached `find` returning the pre-update row.
+- Adapter support prefers `supports_update_returning?` where it exists (MariaDB can do
+  `INSERT ... RETURNING` but not `UPDATE ... RETURNING`), falling back to `supports_insert_returning?`.
+- `alias_attribute` names are resolved before the SET clause is built, as `update_all` does.
+- Active Record is capped at `< 8.2` because rails/rails#57073 proposes an upstream `update_all_returning`
+  with a different API. If a relation already defines these methods, the gem leaves them alone and warns.
 
 - PostgreSQL and SQLite 3.35+ only. Adapter support is read from `supports_insert_returning?`, with a
   direct SQLite version check on Rails 7.0, whose SQLite3 adapter predates that method.
