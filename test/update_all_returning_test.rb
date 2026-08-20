@@ -202,6 +202,49 @@ class UpdateAllReturningTest < ReturningTest
     assert_kind_of Time, row[User.column_names.index("created_at")]
   end
 
+  def test_lock_is_allowed_inside_the_subquery
+    result = User.where(role: :admin).lock.update_all_returning({ role: :member }, returning: :id)
+
+    assert_equal 2, result.rows.size
+  end
+
+  def test_distinct
+    result = User.distinct.update_all_returning({ role: :member }, returning: :id)
+
+    assert_equal User.count, result.rows.size
+  end
+
+  def test_single_table_inheritance_only_touches_the_subclass
+    result = Memo.update_all_returning({ title: "edited" }, returning: %i[type title])
+
+    assert_equal [["Memo", "edited"]], result.rows
+    assert_equal "plain document", Document.find_by(type: nil).title
+  end
+
+  def test_group_raises_rather_than_building_an_invalid_subquery
+    error = assert_raises(ActiveRecord::Returning::Error) do
+      User.group(:role).update_all_returning(role: :member)
+    end
+
+    assert_match(/group/, error.message)
+  end
+
+  def test_empty_returning_list_raises
+    assert_raises(ArgumentError) { User.all.update_all_returning({ role: :member }, returning: []) }
+  end
+
+  def test_postgresql_array_columns
+    skip "PostgreSQL only" unless Dev::ADAPTER == "postgres"
+
+    ActiveRecord::Base.connection.add_column(:posts, :tags, :string, array: true) unless Post.column_names.include?("tags")
+    Post.reset_column_information
+
+    result = Post.where(title: "Draft").update_all_returning({ tags: %w[a b] }, returning: :tags)
+
+    assert_equal 1, result.rows.size
+    assert_equal %w[a b], Post.find_by(title: "Draft").tags
+  end
+
   def test_relation_is_reset_after_updating
     relation = User.where(role: :admin)
     relation.load

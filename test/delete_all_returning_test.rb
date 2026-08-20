@@ -96,6 +96,14 @@ class DeleteAllReturningTest < ReturningTest
     ActiveRecord::Base.connection.disable_query_cache!
   end
 
+  def test_group_raises
+    assert_raises(ActiveRecord::Returning::Error) { Session.group(:user_id).delete_all_returning }
+  end
+
+  def test_empty_returning_list_raises
+    assert_raises(ArgumentError) { Session.all.delete_all_returning(returning: []) }
+  end
+
   def test_plain_delete_all_still_returns_an_integer
     assert_equal 3, Session.all.delete_all
   end

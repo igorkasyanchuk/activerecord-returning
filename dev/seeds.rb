@@ -6,7 +6,7 @@ module Seeds
   # Wipes every table and writes the same small, predictable set of rows the
   # test suite expects.
   def run
-    [Post, Session, User, Legacy].each(&:delete_all)
+    [Post, Session, User, Legacy, Document].each(&:delete_all)
     Note.delete_all if defined?(Note)
 
     ada = User.create!(email: "ada@example.com", role: :admin)
@@ -22,6 +22,9 @@ module Seeds
     Session.create!(user: linus, expires_at: 3.weeks.ago)
 
     Legacy.create!(name: "no primary key here")
+
+    Document.create!(title: "plain document")
+    Memo.create!(title: "a memo")
 
     if defined?(Note)
       Note.create!(shop_id: 1, note_id: 1, body: "first")

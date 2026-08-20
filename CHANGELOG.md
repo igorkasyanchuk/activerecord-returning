@@ -27,8 +27,12 @@ Initial release.
 
 ### Notes
 
-- The query cache is cleared after each statement. Rails 7.0's `exec_query` does not do it, which would
-  leave a cached `find` returning the pre-update row.
+- The query cache is cleared after each statement, both thread-wide (as `update_all` does, so a
+  primary/replica setup does not keep a stale entry) and on the connection written through. Rails 7.0's
+  `exec_query` does not dirty the cache, and its thread-wide clear is itself a no-op under the default
+  `legacy_connection_handling`.
+- A relation with `group` or `having` raises rather than building a subquery the database rejects, and an
+  empty `returning:` list raises instead of emitting a bare `RETURNING`.
 - Adapter support prefers `supports_update_returning?` where it exists, falling back to
   `supports_insert_returning?` — with the MySQL family excluded explicitly, because MariaDB answers
   `supports_insert_returning?` with `true` (it has `INSERT ... RETURNING` since 10.5) while having no
@@ -38,8 +42,8 @@ Initial release.
 - Active Record is capped at `< 8.2` because rails/rails#57073 proposes an upstream `update_all_returning`
   with a different API. If a relation already defines these methods, the gem leaves them alone and warns.
 
-- PostgreSQL and SQLite 3.35+ only. Adapter support is read from `supports_insert_returning?`, with a
-  direct SQLite version check on Rails 7.0, whose SQLite3 adapter predates that method.
+- PostgreSQL and SQLite 3.35+ only. `ActiveRecord::Returning.supported?` decides, and the notes below
+  describe exactly how.
 - Both methods are additive: nothing in Active Record is overridden or prepended.
 - Callbacks, validations and timestamps are skipped, exactly as with `update_all`/`delete_all`.
 

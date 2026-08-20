@@ -44,12 +44,27 @@ module ActiveRecord
             validate!(conn)
             result = conn.exec_query(yield(conn), name)
 
-            # exec_query only dirties the query cache from Rails 7.1 on, and a
-            # cached SELECT of a row we just changed is stale.
-            conn.clear_query_cache
+            clear_query_caches(conn)
             relation.reset # loaded records are stale now
             result
           end
+        end
+
+        # exec_query only dirties the query cache from Rails 7.1 on, and a cached
+        # SELECT of a row we just changed is stale.
+        #
+        # Both clears are deliberate. The thread-wide one is what update_all uses,
+        # and is the one that matters for a primary/replica setup, where the stale
+        # entry can sit in another pool. It is also a no-op on Rails 7.0 with the
+        # default legacy_connection_handling, where it walks connection_handlers
+        # and misses the handler actually in use — Rails 7.0's own update_all
+        # leaves the cache stale for the same reason. So the connection we wrote
+        # through is cleared directly as well.
+        def clear_query_caches(conn)
+          ActiveRecord::Base.clear_query_caches_for_current_thread if
+            ActiveRecord::Base.respond_to?(:clear_query_caches_for_current_thread)
+
+          conn.clear_query_cache
         end
 
         # Rails 7.2 deprecated holding on to a connection via klass.connection.
@@ -72,6 +87,13 @@ module ActiveRecord
               "#{self.class.name} cannot be used with eager loading, because an `includes` that " \
               "becomes a join cannot be reduced to a primary key subquery. Use `.joins` instead, " \
               "or `.unscope(:includes)`."
+          end
+
+          if relation.group_values.any?
+            raise Error,
+              "#{self.class.name} cannot be used with group or having: the primary key subquery would " \
+              "select a column that is not grouped. Reduce the relation to plain conditions first, for " \
+              "example with `where(id: grouped_relation.select(:id))`."
           end
 
           raise Error, "#{klass.name} has no primary key, so there is nothing to match rows on" if primary_keys.empty?
@@ -129,7 +151,11 @@ module ActiveRecord
               "returning: false is not supported, because these methods always return rows. " \
               "Use update_all/delete_all if you only want the count."
           when :all then "*"
-          else Array(returning).map { |column| returning_column(conn, column) }.join(", ")
+          else
+            columns = Array(returning)
+            raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?
+
+            columns.map { |column| returning_column(conn, column) }.join(", ")
           end
         end
 

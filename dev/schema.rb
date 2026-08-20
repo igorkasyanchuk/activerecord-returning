@@ -23,6 +23,12 @@ ActiveRecord::Schema.define do
     t.datetime :expires_at
   end
 
+  # Single table inheritance.
+  create_table :documents, force: true do |t|
+    t.string :type
+    t.string :title
+  end
+
   # No primary key at all.
   create_table :legacy_rows, force: true, id: false do |t|
     t.string :name

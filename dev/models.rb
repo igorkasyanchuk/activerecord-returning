@@ -15,6 +15,9 @@ class Session < ActiveRecord::Base
   belongs_to :user
 end
 
+class Document < ActiveRecord::Base; end
+class Memo < Document; end
+
 class Legacy < ActiveRecord::Base
   self.table_name = "legacy_rows"
 end

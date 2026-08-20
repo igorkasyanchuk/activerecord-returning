@@ -226,9 +226,14 @@ about them:
 ```ruby
 User.joins(:posts).where(posts: { published: true }).update_all_returning(role: :member)
 User.order(:created_at).limit(100).update_all_returning({ role: :member }, returning: :id)
+User.where(role: :admin).lock.update_all_returning(role: :member)   # FOR UPDATE in the subquery
 user.posts.update_all_returning({ published: true }, returning: :id)
+Memo.update_all_returning(title: "edited")    # STI: only rows of this subclass
 Note.where(shop_id: 1).delete_all_returning   # WHERE ("shop_id", "note_id") IN (SELECT ...)
 ```
+
+`distinct`, `lock` and single-table inheritance are covered by the suite; `group`/`having` raise, see
+Caveats.
 
 No `Arel::UpdateManager`, no `_substitute_values`, no `build_arel` — nothing private. That is why one code
 path covers Rails 7.0 through 8.1.
@@ -264,6 +269,10 @@ User.transaction do
   User.where(id: ids).update_all_returning({ role: :member }, returning: :email)
 end
 ```
+
+**`group` and `having` are rejected**, because the primary-key subquery would select an ungrouped column.
+PostgreSQL rejects that outright; SQLite quietly returns something arbitrary. Reduce the relation first:
+`where(id: grouped_relation.select(:id))`.
 
 **Eager loading is rejected.** An `includes` that turns into a join cannot be reduced to a primary-key
 subquery, so it raises `ActiveRecord::Returning::Error`. Use `.joins` instead, or `.unscope(:includes)`.
@@ -323,7 +332,8 @@ The trade-off: a chainable form would let you bake it into a scope
 | --- | --- |
 | `ActiveRecord::Returning::UnsupportedAdapter` | the adapter cannot do `RETURNING` (MySQL, MariaDB, SQLite < 3.35) |
 | `ActiveRecord::Returning::Error` | eager loading, or a model with no primary key |
-| `ArgumentError` | empty updates, a bare String in `returning:`, or `returning: false` |
+| `ActiveRecord::Returning::Error` | a relation with `group`/`having` |
+| `ArgumentError` | empty updates, a bare String in `returning:`, an empty `returning:` list, or `returning: false` |
 
 `UnsupportedAdapter` inherits from `ActiveRecord::Returning::Error`, which inherits from `StandardError`.
 
