@@ -89,14 +89,23 @@ module ActiveRecord
               "or `.unscope(:includes)`."
           end
 
+          raise Error, "#{klass.name} has no primary key, so there is nothing to match rows on" if primary_keys.empty?
+
+          unless relation.from_clause.empty?
+            raise Error,
+              "#{self.class.name} cannot be used with `from`, because the primary key subquery selects " \
+              "#{primary_keys.map { |name| "#{klass.table_name}.#{name}" }.join(", ")} while `from` renames " \
+              "the table it reads. " \
+              "The database then reads that as a reference to the row being changed and matches every " \
+              "row in the table. Use `.unscope(:from)`."
+          end
+
           if relation.group_values.any? || !relation.having_clause.empty?
             raise Error,
               "#{self.class.name} cannot be used with group or having: the primary key subquery would " \
               "select a column that is not grouped. Reduce the relation to plain conditions first, for " \
               "example with `where(id: grouped_relation.select(:id))`."
           end
-
-          raise Error, "#{klass.name} has no primary key, so there is nothing to match rows on" if primary_keys.empty?
         end
 
         def set_clause(conn, updates)

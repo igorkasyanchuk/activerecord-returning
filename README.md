@@ -247,7 +247,13 @@ picked up. Where that matters, lock explicitly or raise the isolation level.
 | --- | --- |
 | `includes` that eager-loads | a join can't be reduced to a primary-key subquery — use `joins` |
 | `group` / `having` | the subquery would select an ungrouped column — use `where(id: grouped.select(:id))` |
+| `from` | it renames the table the subquery reads, so the primary key would resolve to the row being changed and every row would match — use `unscope(:from)` |
 | model without a primary key | nothing to match rows on |
+
+**`delete_all_returning` on a `has_many` deletes.** `user.posts.delete_all` nullifies `posts.user_id`
+unless the association declares `dependent: :delete_all`. `delete_all_returning` always issues a `DELETE`,
+because returning rows that still exist would be a lie. Renaming one call to the other on an association
+without `dependent: :delete_all` therefore removes rows where the old code only unset a foreign key.
 
 **`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` refers
 to the updated row, not the join.
@@ -290,7 +296,7 @@ The trade-off: you can't bake it into a scope. That's the intended cost.
 | Error | When |
 | --- | --- |
 | `ActiveRecord::Returning::UnsupportedAdapter` | MySQL, MariaDB, SQLite < 3.35 |
-| `ActiveRecord::Returning::Error` | eager loading, `group`/`having`, no primary key |
+| `ActiveRecord::Returning::Error` | eager loading, `group`/`having`, `from`, no primary key |
 | `ArgumentError` | empty updates, bare String / empty list / `false` in `returning:` |
 
 `UnsupportedAdapter < Error < StandardError`.

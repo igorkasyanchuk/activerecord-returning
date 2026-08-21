@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A relation with `from` no longer changes every row in the table. The primary key subquery selects
+  `table.id` while `from` renames the table it reads, so the database read `table.id` as a reference to the
+  row being changed and matched all of them — a whole-table `UPDATE`/`DELETE` from a relation that selected
+  a few rows. It raises `ActiveRecord::Returning::Error` now, pointing at `unscope(:from)`.
+
+### Added
+
+- A combination test suite: every relation shape — and combinations of them — run through both
+  `update_all_returning` and `delete_all_returning`, asserting the rows the relation selects are the rows
+  returned, the rows returned are the rows the database changed, and nothing else moved.
+
+### Notes
+
+- Documented that `delete_all_returning` on a `has_many` deletes rows, while `delete_all` on the same
+  association nullifies the foreign key unless it declares `dependent: :delete_all`.
+
 ## [0.1.0] - 2026-08-21
 
 Initial release.

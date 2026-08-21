@@ -28,3 +28,9 @@ if ActiveRecord::VERSION::STRING >= "7.1"
     self.primary_key = [:shop_id, :note_id]
   end
 end
+
+# A default scope, so the combination tests can prove one survives the subquery.
+class ExpiredSession < ActiveRecord::Base
+  self.table_name = "sessions"
+  default_scope { where(expires_at: ...Time.current) }
+end
