@@ -276,8 +276,22 @@ So the gemspec caps Active Record at `< 8.2`, and if `ActiveRecord::Relation` al
 method, the gem leaves that one alone and warns at boot instead of silently doing nothing.
 
 Compared to `insert_all`/`upsert_all`, which already have `returning:`: same return type, same default.
-Differences — `:all` is an addition here, `returning: false` raises instead of returning an empty Result,
-and MySQL raises instead of quietly returning an empty Result.
+
+The difference that matters is not the keyword — **`upsert_all` creates rows, these methods never do.**
+It takes a list of attributes rather than a scope, so it cannot express `where(...)`, and any key that
+isn't in the table yet becomes a new row:
+
+```ruby
+User.upsert_all([{ id: 999, email: "ghost@example.com" }], returning: %i[id email])
+# => #<ActiveRecord::Result [[999, "ghost@example.com"]]>   looks like a row you changed
+User.count # => 4                                           it was inserted
+```
+
+A stale id, a typo, a half-built payload — inserted, and handed back as though it had been updated.
+`update_all_returning` can only touch rows the relation already matched.
+
+Smaller differences: `:all` is an addition here, `returning: false` raises instead of returning an empty
+Result, and MySQL raises instead of quietly returning an empty Result.
 
 ## Why methods, not a chainable `.returning`
 
