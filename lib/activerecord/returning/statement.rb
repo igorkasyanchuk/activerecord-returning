@@ -153,38 +153,41 @@ module ActiveRecord
         end
 
         def returning_clause(conn)
-          case returning
-          when nil then primary_keys.map { |name| conn.quote_column_name(name) }.join(", ")
-          when false
+          return primary_keys.map { |name| conn.quote_column_name(name) }.join(", ") if returning.nil?
+
+          if returning == false
             raise ArgumentError,
               "returning: false is not supported, because these methods always return rows. " \
               "Use update_all/delete_all if you only want the count."
-          # ponytail: a column literally named _all is shadowed by the sentinel; Arel.sql is the escape.
-          when :_all then "*"
-          when :all
+          end
+
+          # Normalized once, so :_all and [:_all] mean the same thing and the
+          # sentinel is checked in exactly one place, bare or listed.
+          columns = Array(returning)
+          raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?
+
+          if columns.include?(:all)
             raise ArgumentError,
               "returning: :all was renamed to :_all, because :all is ambiguous with a column named " \
               "\"all\". Use returning: :_all for RETURNING *, or Arel.sql('\"all\"') for the column."
-          else
-            columns = Array(returning)
-            raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?
-
-            columns.map { |column| returning_column(conn, column) }.join(", ")
           end
+
+          # ponytail: a column literally named _all is shadowed by the sentinel; Arel.sql is the escape.
+          if columns.include?(:_all)
+            return "*" if columns == [:_all]
+
+            raise ArgumentError,
+              "returning: :_all stands for RETURNING * and cannot be combined with other columns. " \
+              "Use returning: :_all alone, or list every column."
+          end
+
+          columns.map { |column| returning_column(conn, column) }.join(", ")
         end
 
         def returning_column(conn, column)
-          # SqlLiteral is a String subclass, so it has to be checked first. The
-          # sentinels are checked before Symbol, so they cannot silently become
-          # column references inside a list — on SQLite an unknown "all" would
-          # not even error, it falls back to a string literal.
+          # SqlLiteral is a String subclass, so it has to be checked first.
           case column
           when Arel::Nodes::SqlLiteral then column.to_s
-          when :all, :_all
-            raise ArgumentError,
-              "returning: #{column.inspect} stands for RETURNING * and cannot be combined with other " \
-              "columns — use returning: :_all alone, or list every column. For a column literally " \
-              "named #{column.to_s.inspect}, use Arel.sql."
           when Symbol then returning_attribute(conn, column)
           when String
             raise ArgumentError,

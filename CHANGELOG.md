@@ -34,9 +34,8 @@ Initial release.
   over the current scope and returns the changed rows as an `ActiveRecord::Result`.
 - `ActiveRecord::Relation#delete_all_returning(returning: nil)` — the same for `DELETE ... RETURNING`.
 - `returning:` accepts a symbol, an array of symbols, `:_all` for `RETURNING *`, or `Arel.sql` for raw SQL.
-  It defaults to the primary key, including composite primary keys on Rails 7.1+. `:all` raises, pointing
-  at `:_all` — it would be ambiguous with a column named `all` — and so do `:all`/`:_all` inside an array,
-  where they would otherwise read as column references.
+  It defaults to the primary key, including composite primary keys on Rails 7.1+. `:all` raises pointing at
+  `:_all` (it could be a real column name), and so does `:_all` combined with other columns.
 - Optimistic locking support: the locking column is incremented exactly as `update_all` does, unless the
   caller sets it explicitly.
 - Both methods are also delegated onto the model class, like `update_all`, so `User.update_all_returning(...)`

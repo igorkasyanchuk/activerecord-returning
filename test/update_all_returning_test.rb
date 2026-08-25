@@ -52,28 +52,42 @@ class UpdateAllReturningTest < ReturningTest
     assert_equal "linus@example.com", result.to_a.first["email"]
   end
 
-  def test_legacy_returning_all_raises
-    error = assert_raises(ArgumentError) do
-      User.update_all_returning({ role: :member }, returning: :all)
-    end
-
-    assert_match(/renamed to :_all/, error.message)
-  end
-
-  def test_sentinels_inside_a_list_raise
-    [%i[id all], [:all], [:_all], %i[id _all]].each do |list|
+  def test_legacy_returning_all_raises_bare_or_listed
+    [:all, [:all], %i[id all]].each do |value|
       error = assert_raises(ArgumentError) do
-        User.update_all_returning({ role: :member }, returning: list)
+        User.update_all_returning({ role: :member }, returning: value)
       end
 
-      assert_match(/cannot be combined|alone/, error.message)
+      assert_match(/renamed to :_all/, error.message)
     end
+  end
+
+  def test_a_list_of_just_the_sentinel_is_returning_star
+    result = User.where(email: "linus@example.com").update_all_returning({ role: :admin }, returning: [:_all])
+
+    assert_equal User.column_names.sort, result.columns.sort
+  end
+
+  def test_the_sentinel_combined_with_other_columns_raises
+    error = assert_raises(ArgumentError) do
+      User.update_all_returning({ role: :member }, returning: %i[id _all])
+    end
+
+    assert_match(/alone/, error.message)
   end
 
   def test_arel_sql_star_is_the_returning_all_escape_hatch
     result = User.where(email: "ada@example.com").update_all_returning({ role: :member }, returning: Arel.sql("*"))
 
     assert_equal User.column_names.sort, result.columns.sort
+  end
+
+  def test_arel_sql_works_inside_a_list
+    result = User.where(email: "ada@example.com")
+                 .update_all_returning({ role: :member }, returning: [:id, Arel.sql("email AS contact")])
+
+    assert_equal %w[id contact], result.columns
+    assert_equal "ada@example.com", result.to_a.first["contact"]
   end
 
   def test_arel_sql_passes_through_with_an_alias

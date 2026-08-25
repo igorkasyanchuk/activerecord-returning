@@ -25,11 +25,13 @@ class DeleteAllReturningTest < ReturningTest
   end
 
   def test_legacy_returning_all_raises
-    assert_raises(ArgumentError) { Session.delete_all_returning(returning: :all) }
+    error = assert_raises(ArgumentError) { Session.delete_all_returning(returning: :all) }
+
+    assert_match(/renamed to :_all/, error.message)
   end
 
-  def test_sentinels_inside_a_list_raise
-    error = assert_raises(ArgumentError) { Session.delete_all_returning(returning: [:_all]) }
+  def test_the_sentinel_combined_with_other_columns_raises
+    error = assert_raises(ArgumentError) { Session.delete_all_returning(returning: %i[id _all]) }
 
     assert_match(/alone/, error.message)
   end
