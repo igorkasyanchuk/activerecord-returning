@@ -155,30 +155,34 @@ module ActiveRecord
         def returning_clause(conn)
           return primary_keys.map { |name| conn.quote_column_name(name) }.join(", ") if returning.nil?
 
-          if returning == false
+          # Normalized once, so every special value is checked in one place,
+          # bare or listed. The sentinel checks compare symbols, and they must
+          # run before the column path: on SQLite an unknown double-quoted
+          # identifier does not error, it falls back to a string literal —
+          # silent wrong data instead of an exception.
+          columns = Array(returning)
+          raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?
+
+          if columns.include?(false)
             raise ArgumentError,
               "returning: false is not supported, because these methods always return rows. " \
               "Use update_all/delete_all if you only want the count."
           end
 
-          # Normalized once, so :_all and [:_all] mean the same thing and the
-          # sentinel is checked in exactly one place, bare or listed.
-          columns = Array(returning)
-          raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?
-
           if columns.include?(:all)
             raise ArgumentError,
-              "returning: :all was renamed to :_all, because :all is ambiguous with a column named " \
-              "\"all\". Use returning: :_all for RETURNING *, or Arel.sql('\"all\"') for the column."
+              ":all was renamed to :_all, and RETURNING * cannot be combined with other columns — " \
+              "use returning: :_all alone. For a column literally named \"all\", use Arel.sql('\"all\"')."
           end
 
           # ponytail: a column literally named _all is shadowed by the sentinel; Arel.sql is the escape.
           if columns.include?(:_all)
-            return "*" if columns == [:_all]
+            return "*" if columns.uniq == [:_all]
 
             raise ArgumentError,
               "returning: :_all stands for RETURNING * and cannot be combined with other columns. " \
-              "Use returning: :_all alone, or list every column."
+              "Use returning: :_all alone, or list every column. For a column literally named " \
+              "\"_all\", use Arel.sql('\"_all\"')."
           end
 
           columns.map { |column| returning_column(conn, column) }.join(", ")

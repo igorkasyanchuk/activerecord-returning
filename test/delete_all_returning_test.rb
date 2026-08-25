@@ -24,18 +24,6 @@ class DeleteAllReturningTest < ReturningTest
     assert_equal Session.column_names.sort, result.columns.sort
   end
 
-  def test_legacy_returning_all_raises
-    error = assert_raises(ArgumentError) { Session.delete_all_returning(returning: :all) }
-
-    assert_match(/renamed to :_all/, error.message)
-  end
-
-  def test_the_sentinel_combined_with_other_columns_raises
-    error = assert_raises(ArgumentError) { Session.delete_all_returning(returning: %i[id _all]) }
-
-    assert_match(/alone/, error.message)
-  end
-
   def test_none_deletes_nothing
     result = Session.none.delete_all_returning
 

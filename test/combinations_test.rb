@@ -91,7 +91,9 @@ class CombinationsTest < ReturningTest
     "symbol" => [:user_id, %w[user_id]],
     "array" => [%i[id user_id], %w[id user_id]],
     "all" => [:_all, %w[id user_id expires_at]],
-    "arel sql" => [Arel.sql("id AS session_id"), %w[session_id]]
+    "all in a list" => [[:_all], %w[id user_id expires_at]],
+    "arel sql" => [Arel.sql("id AS session_id"), %w[session_id]],
+    "arel sql in a list" => [[:id, Arel.sql("user_id AS uid")], %w[id uid]]
   }.freeze
 
   RETURNING_FORMS.each do |name, (returning, columns)|

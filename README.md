@@ -126,7 +126,7 @@ User.where(role: :admin).update_all_returning(role: :member, updated_at: Time.cu
 | omitted / `nil` | the primary key (all of them, for a composite primary key) |
 | `:email` | `RETURNING "email"` |
 | `%i[id email]` | `RETURNING "id", "email"` |
-| `:_all` | `RETURNING *` |
+| `:_all` (bare or as `[:_all]`) | `RETURNING *` |
 | `Arel.sql("id, now() AS at")` | that SQL, verbatim |
 
 Rejected on purpose, each with a message saying what to do instead: a bare `String` (pass symbols, or wrap

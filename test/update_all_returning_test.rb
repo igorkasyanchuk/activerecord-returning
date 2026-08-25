@@ -107,9 +107,11 @@ class UpdateAllReturningTest < ReturningTest
   end
 
   def test_returning_false_raises_and_says_what_to_use_instead
-    error = assert_raises(ArgumentError) { User.all.update_all_returning({ role: :member }, returning: false) }
+    [false, [false]].each do |value|
+      error = assert_raises(ArgumentError) { User.all.update_all_returning({ role: :member }, returning: value) }
 
-    assert_match(/update_all/, error.message)
+      assert_match(/update_all/, error.message)
+    end
   end
 
   def test_empty_updates_raises
