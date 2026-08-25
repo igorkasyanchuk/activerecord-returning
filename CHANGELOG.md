@@ -6,12 +6,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
-
-- `returning: :all` is now `returning: :_all`. `:all` collides with a column literally named `all`; it
-  now raises `ArgumentError` pointing at `:_all` (or `Arel.sql` for the column) instead of silently
-  meaning `RETURNING *`.
-
 ### Fixed
 
 - A relation with `from` no longer changes every row in the table. The primary key subquery selects
@@ -39,8 +33,10 @@ Initial release.
 - `ActiveRecord::Relation#update_all_returning(updates, returning: nil)` — runs an `UPDATE ... RETURNING`
   over the current scope and returns the changed rows as an `ActiveRecord::Result`.
 - `ActiveRecord::Relation#delete_all_returning(returning: nil)` — the same for `DELETE ... RETURNING`.
-- `returning:` accepts a symbol, an array of symbols, `:all` for `RETURNING *`, or `Arel.sql` for raw SQL.
-  It defaults to the primary key, including composite primary keys on Rails 7.1+.
+- `returning:` accepts a symbol, an array of symbols, `:_all` for `RETURNING *`, or `Arel.sql` for raw SQL.
+  It defaults to the primary key, including composite primary keys on Rails 7.1+. `:all` raises, pointing
+  at `:_all` — it would be ambiguous with a column named `all` — and so do `:all`/`:_all` inside an array,
+  where they would otherwise read as column references.
 - Optimistic locking support: the locking column is incremented exactly as `update_all` does, unless the
   caller sets it explicitly.
 - Both methods are also delegated onto the model class, like `update_all`, so `User.update_all_returning(...)`

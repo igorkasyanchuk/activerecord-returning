@@ -130,8 +130,9 @@ User.where(role: :admin).update_all_returning(role: :member, updated_at: Time.cu
 | `Arel.sql("id, now() AS at")` | that SQL, verbatim |
 
 Rejected on purpose, each with a message saying what to do instead: a bare `String` (pass symbols, or wrap
-SQL in `Arel.sql`), an empty list, `returning: false` (use plain `update_all`), and `:all` (ambiguous with
-a column named `all` — use `:_all`).
+SQL in `Arel.sql`), an empty list, `returning: false` (use plain `update_all`), `:all` (renamed to `:_all`,
+since `all` can be a real column name), and `:all`/`:_all` inside an array (`RETURNING *` cannot be combined
+with other columns). A column literally named `all` or `_all` is still reachable with `Arel.sql`.
 
 `updates` takes every shape `update_all` accepts:
 

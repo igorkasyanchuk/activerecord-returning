@@ -52,12 +52,28 @@ class UpdateAllReturningTest < ReturningTest
     assert_equal "linus@example.com", result.to_a.first["email"]
   end
 
-  def test_returning_all_raises_and_points_at_underscore_all
+  def test_legacy_returning_all_raises
     error = assert_raises(ArgumentError) do
-      User.all.update_all_returning({ role: :member }, returning: :all)
+      User.update_all_returning({ role: :member }, returning: :all)
     end
 
-    assert_match(/:_all/, error.message)
+    assert_match(/renamed to :_all/, error.message)
+  end
+
+  def test_sentinels_inside_a_list_raise
+    [%i[id all], [:all], [:_all], %i[id _all]].each do |list|
+      error = assert_raises(ArgumentError) do
+        User.update_all_returning({ role: :member }, returning: list)
+      end
+
+      assert_match(/cannot be combined|alone/, error.message)
+    end
+  end
+
+  def test_arel_sql_star_is_the_returning_all_escape_hatch
+    result = User.where(email: "ada@example.com").update_all_returning({ role: :member }, returning: Arel.sql("*"))
+
+    assert_equal User.column_names.sort, result.columns.sort
   end
 
   def test_arel_sql_passes_through_with_an_alias
