@@ -159,7 +159,11 @@ module ActiveRecord
             raise ArgumentError,
               "returning: false is not supported, because these methods always return rows. " \
               "Use update_all/delete_all if you only want the count."
-          when :all then "*"
+          when :_all then "*"
+          when :all
+            raise ArgumentError,
+              "returning: :all is ambiguous with a column named \"all\". Use returning: :_all for " \
+              "RETURNING *, or Arel.sql('\"all\"') for the column."
           else
             columns = Array(returning)
             raise ArgumentError, "returning: is empty, so there is nothing to return" if columns.empty?

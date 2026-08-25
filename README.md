@@ -29,7 +29,7 @@ gem "activerecord-returning"
 User.where(role: :admin).update_all_returning(role: :member)                    # => primary keys
 User.where(role: :admin).update_all_returning({ role: :member }, returning: :email)
 User.where(role: :admin).update_all_returning({ role: :member }, returning: %i[id email])
-User.where(role: :admin).update_all_returning({ role: :member }, returning: :all)     # RETURNING *
+User.where(role: :admin).update_all_returning({ role: :member }, returning: :_all)     # RETURNING *
 User.update_all_returning(role: :member)                                        # on the model, too
 
 Session.where(expires_at: ..1.week.ago).delete_all_returning(returning: :user_id)
@@ -75,7 +75,7 @@ expired.rows.flatten.uniq.each { |user_id| SessionExpiredMailer.notify(user_id).
 
 ```ruby
 claimed = Job.pending.order(:created_at).limit(1)
-             .update_all_returning({ status: :claimed, worker: worker_id }, returning: :all)
+             .update_all_returning({ status: :claimed, worker: worker_id }, returning: :_all)
 
 job = Job.instantiate(claimed.to_a.first) if claimed.length.positive?
 ```
@@ -106,7 +106,7 @@ Rails.logger.info("expired #{result.length} trials: #{result.rows.inspect}")
 
 ```ruby
 users = User.where(role: :admin)
-            .update_all_returning({ role: :member }, returning: :all)
+            .update_all_returning({ role: :member }, returning: :_all)
             .map { |attributes| User.instantiate(attributes) }
 
 users.first.email        # => "ada@example.com"
@@ -126,11 +126,12 @@ User.where(role: :admin).update_all_returning(role: :member, updated_at: Time.cu
 | omitted / `nil` | the primary key (all of them, for a composite primary key) |
 | `:email` | `RETURNING "email"` |
 | `%i[id email]` | `RETURNING "id", "email"` |
-| `:all` | `RETURNING *` |
+| `:_all` | `RETURNING *` |
 | `Arel.sql("id, now() AS at")` | that SQL, verbatim |
 
 Rejected on purpose, each with a message saying what to do instead: a bare `String` (pass symbols, or wrap
-SQL in `Arel.sql`), an empty list, and `returning: false` (use plain `update_all`).
+SQL in `Arel.sql`), an empty list, `returning: false` (use plain `update_all`), and `:all` (ambiguous with
+a column named `all` — use `:_all`).
 
 `updates` takes every shape `update_all` accepts:
 
@@ -255,7 +256,7 @@ unless the association declares `dependent: :delete_all`. `delete_all_returning`
 because returning rows that still exist would be a lie. Renaming one call to the other on an association
 without `dependent: :delete_all` therefore removes rows where the old code only unset a foreign key.
 
-**`returning: :all` on a joined relation** returns the updated table's columns only — `RETURNING *` refers
+**`returning: :_all` on a joined relation** returns the updated table's columns only — `RETURNING *` refers
 to the updated row, not the join.
 
 **Performance.** The subquery is always there, even for a plain `where`, while `update_all` writes a direct
@@ -290,7 +291,7 @@ User.count # => 4                                           it was inserted
 A stale id, a typo, a half-built payload — inserted, and handed back as though it had been updated.
 `update_all_returning` can only touch rows the relation already matched.
 
-Smaller differences: `:all` is an addition here, `returning: false` raises instead of returning an empty
+Smaller differences: `:_all` is an addition here, `returning: false` raises instead of returning an empty
 Result, and MySQL raises instead of quietly returning an empty Result.
 
 ## Why methods, not a chainable `.returning`

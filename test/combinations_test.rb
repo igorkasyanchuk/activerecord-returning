@@ -90,7 +90,7 @@ class CombinationsTest < ReturningTest
     "default" => [nil, %w[id]],
     "symbol" => [:user_id, %w[user_id]],
     "array" => [%i[id user_id], %w[id user_id]],
-    "all" => [:all, %w[id user_id expires_at]],
+    "all" => [:_all, %w[id user_id expires_at]],
     "arel sql" => [Arel.sql("id AS session_id"), %w[session_id]]
   }.freeze
 

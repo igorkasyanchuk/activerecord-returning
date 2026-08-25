@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `returning: :all` is now `returning: :_all`. `:all` collides with a column literally named `all`; it
+  now raises `ArgumentError` pointing at `:_all` (or `Arel.sql` for the column) instead of silently
+  meaning `RETURNING *`.
+
 ### Fixed
 
 - A relation with `from` no longer changes every row in the table. The primary key subquery selects

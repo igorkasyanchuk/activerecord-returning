@@ -46,10 +46,18 @@ class UpdateAllReturningTest < ReturningTest
   end
 
   def test_returning_all_yields_every_column
-    result = User.where(email: "linus@example.com").update_all_returning({ role: :admin }, returning: :all)
+    result = User.where(email: "linus@example.com").update_all_returning({ role: :admin }, returning: :_all)
 
     assert_equal User.column_names.sort, result.columns.sort
     assert_equal "linus@example.com", result.to_a.first["email"]
+  end
+
+  def test_returning_all_raises_and_points_at_underscore_all
+    error = assert_raises(ArgumentError) do
+      User.all.update_all_returning({ role: :member }, returning: :all)
+    end
+
+    assert_match(/:_all/, error.message)
   end
 
   def test_arel_sql_passes_through_with_an_alias
@@ -195,7 +203,7 @@ class UpdateAllReturningTest < ReturningTest
   end
 
   def test_values_can_be_cast_with_the_models_types
-    result = User.where(email: "ada@example.com").update_all_returning({ role: :member }, returning: :all)
+    result = User.where(email: "ada@example.com").update_all_returning({ role: :member }, returning: :_all)
 
     row = result.cast_values(User.attribute_types).first
 

@@ -19,7 +19,7 @@ class DeleteAllReturningTest < ReturningTest
   end
 
   def test_returning_all
-    result = Session.where(expires_at: ...Time.current).delete_all_returning(returning: :all)
+    result = Session.where(expires_at: ...Time.current).delete_all_returning(returning: :_all)
 
     assert_equal Session.column_names.sort, result.columns.sort
   end
